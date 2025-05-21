@@ -1,0 +1,7 @@
+Flask==2.2.3
+uvicorn>=0.23.1
+python-dotenv==1.0.0
+mcp==1.8.1
+google-generativeai==0.3.0
+a2wsgi==1.4.0
+flask-cors==2.1.3

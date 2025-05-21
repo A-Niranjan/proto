@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Direct Upload Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .form-container { border: 1px solid #ccc; padding: 20px; margin-bottom: 20px; border-radius: 5px; }
+        button { background-color: #4CAF50; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #45a049; }
+        .result { margin-top: 20px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>Direct File Upload Test</h1>
+    
+    <div class="form-container">
+        <h2>Upload File Directly to Server</h2>
+        <form id="uploadForm">
+            <input type="file" id="fileInput" accept="video/*,image/*,audio/*">
+            <button type="button" id="uploadButton">Upload File</button>
+        </form>
+        <div id="uploadResult" class="result"></div>
+    </div>
+    
+    <div class="form-container">
+        <h2>List Media Files</h2>
+        <button type="button" id="listMediaButton">Refresh Media List</button>
+        <div id="mediaList" class="result"></div>
+    </div>
+    
+    <script>
+        document.getElementById('uploadButton').addEventListener('click', uploadFile);
+        document.getElementById('listMediaButton').addEventListener('click', listMedia);
+        
+        // Load media list on page load
+        window.addEventListener('load', listMedia);
+        
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const resultDiv = document.getElementById('uploadResult');
+            
+            if (!fileInput.files.length) {
+                resultDiv.innerHTML = '<p class="error">Please select a file first</p>';
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            resultDiv.innerHTML = '<p>Uploading...</p>';
+            
+            try {
+                const response = await fetch('http://localhost:3001/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('Upload result:', result);
+                
+                resultDiv.innerHTML = `
+                    <p class="success">Upload successful!</p>
+                    <pre>${JSON.stringify(result, null, 2)}</pre>
+                `;
+                
+                // Refresh media list
+                listMedia();
+            } catch (error) {
+                console.error('Upload error:', error);
+                resultDiv.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+        
+        async function listMedia() {
+            const mediaListDiv = document.getElementById('mediaList');
+            mediaListDiv.innerHTML = '<p>Loading media...</p>';
+            
+            try {
+                const response = await fetch('http://localhost:3001/api/media');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const media = await response.json();
+                console.log('Media list:', media);
+                
+                let html = '';
+                
+                // Videos
+                html += '<h3>Videos:</h3>';
+                if (media.videos && media.videos.length > 0) {
+                    html += '<ul>';
+                    media.videos.forEach(video => {
+                        html += `<li>
+                            <strong>${video.name}</strong> 
+                            <a href="http://localhost:3001${video.path}" target="_blank">View</a>
+                        </li>`;
+                    });
+                    html += '</ul>';
+                } else {
+                    html += '<p>No videos found</p>';
+                }
+                
+                // Photos
+                html += '<h3>Photos:</h3>';
+                if (media.photos && media.photos.length > 0) {
+                    html += '<ul>';
+                    media.photos.forEach(photo => {
+                        html += `<li>
+                            <strong>${photo.name}</strong> 
+                            <a href="http://localhost:3001${photo.path}" target="_blank">View</a>
+                        </li>`;
+                    });
+                    html += '</ul>';
+                } else {
+                    html += '<p>No photos found</p>';
+                }
+                
+                // Audio
+                html += '<h3>Audio:</h3>';
+                if (media.audio && media.audio.length > 0) {
+                    html += '<ul>';
+                    media.audio.forEach(audio => {
+                        html += `<li>
+                            <strong>${audio.name}</strong> 
+                            <a href="http://localhost:3001${audio.path}" target="_blank">View</a>
+                        </li>`;
+                    });
+                    html += '</ul>';
+                } else {
+                    html += '<p>No audio found</p>';
+                }
+                
+                mediaListDiv.innerHTML = html;
+            } catch (error) {
+                console.error('List media error:', error);
+                mediaListDiv.innerHTML = `<p class="error">Error loading media: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

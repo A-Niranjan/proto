@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Media Upload Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .upload-form {
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Media Upload Test</h1>
+    
+    <div class="upload-form">
+        <h2>Upload Media File</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="file" id="fileInput" name="file" accept="video/*,image/*,audio/*"><br><br>
+            <button type="button" class="button" onclick="uploadFile(false)">Upload Permanently</button>
+            <button type="button" class="button" onclick="uploadFile(true)">Upload as Temp</button>
+        </form>
+        <div id="result"></div>
+    </div>
+    
+    <div id="mediaList"></div>
+    
+    <script>
+        // API base URL
+        const API_BASE_URL = 'http://localhost:8001/api';
+        
+        // Function to upload a file
+        async function uploadFile(isTemp) {
+            const fileInput = document.getElementById('fileInput');
+            const resultDiv = document.getElementById('result');
+            
+            if (!fileInput.files.length) {
+                resultDiv.innerHTML = '<p style="color:red">Please select a file first</p>';
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            // Determine endpoint based on whether it's a temp file
+            const endpoint = isTemp ? `${API_BASE_URL}/upload/temp` : `${API_BASE_URL}/upload`;
+            
+            try {
+                resultDiv.innerHTML = '<p>Uploading...</p>';
+                
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Upload response:', data);
+                
+                resultDiv.innerHTML = `
+                    <p style="color:green">Upload successful!</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                
+                // Reload media list
+                loadMediaList();
+            } catch (error) {
+                console.error('Error uploading file:', error);
+                resultDiv.innerHTML = `<p style="color:red">Error: ${error.message}</p>`;
+            }
+        }
+        
+        // Function to load the media list
+        async function loadMediaList() {
+            const mediaListDiv = document.getElementById('mediaList');
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/media`);
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to get media: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Media list:', data);
+                
+                // Display the media list
+                let html = '<h2>Media List</h2>';
+                
+                if (data.videos.length > 0) {
+                    html += '<h3>Videos</h3><ul>';
+                    data.videos.forEach(video => {
+                        html += `<li>${video.name} - <a href="${API_BASE_URL}${video.path.substring(4)}" target="_blank">View</a></li>`;
+                    });
+                    html += '</ul>';
+                } else {
+                    html += '<p>No videos found</p>';
+                }
+                
+                if (data.photos.length > 0) {
+                    html += '<h3>Photos</h3><ul>';
+                    data.photos.forEach(photo => {
+                        html += `<li>${photo.name} - <a href="${API_BASE_URL}${photo.path.substring(4)}" target="_blank">View</a></li>`;
+                    });
+                    html += '</ul>';
+                } else {
+                    html += '<p>No photos found</p>';
+                }
+                
+                if (data.audio.length > 0) {
+                    html += '<h3>Audio</h3><ul>';
+                    data.audio.forEach(audio => {
+                        html += `<li>${audio.name} - <a href="${API_BASE_URL}${audio.path.substring(4)}" target="_blank">View</a></li>`;
+                    });
+                    html += '</ul>';
+                } else {
+                    html += '<p>No audio found</p>';
+                }
+                
+                mediaListDiv.innerHTML = html;
+            } catch (error) {
+                console.error('Error getting media list:', error);
+                mediaListDiv.innerHTML = `<p style="color:red">Error loading media list: ${error.message}</p>`;
+            }
+        }
+        
+        // Load media list on page load
+        document.addEventListener('DOMContentLoaded', loadMediaList);
+    </script>
+</body>
+</html>
