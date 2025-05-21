@@ -671,7 +671,7 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                     <div className="media-thumbnail">
                       {(video.type === 'photos' || video.path?.match(/\.(jpg|jpeg|png|gif)$/i)) ? (
                         <img 
-                          src={video.path || '/placeholder-image.jpg'}
+                          src={`http://localhost:3001${video.path}` || '/placeholder-image.jpg'}
                           alt={video.name}
                           style={{
                             position: 'absolute',
@@ -680,21 +680,76 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                             width: '100%',
                             height: '100%',
                             objectFit: 'cover'
+                          }}
+                          onError={(e) => {
+                            console.error('Error loading image thumbnail', video.path);
+                            e.target.src = 'https://placehold.co/600x400/9c27b0/white?text=Image';
                           }}
                         />
                       ) : (video.type === 'videos' || video.path?.match(/\.(mp4|webm|mov)$/i)) ? (
-                        <img 
-                          src={video.thumbnail || '/placeholder-video.jpg'}
-                          alt={video.name}
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover'
-                          }}
-                        />
+                        <div style={{ 
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          borderRadius: '12px',
+                          overflow: 'hidden'
+                        }}>
+                          {video.thumbnailPath ? (
+                            <>
+                              <img 
+                                src={`http://localhost:3001${video.thumbnailPath}`} 
+                                alt={video.name}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  objectFit: 'cover',
+                                }}
+                                onError={(e) => {
+                                  console.error('Error loading video thumbnail', video.thumbnailPath);
+                                  e.target.style.display = 'none';
+                                }}
+                              />
+                              <div style={{ 
+                                position: 'absolute', 
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                height: '100%',
+                                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}>
+                                <PlayArrowIcon sx={{ fontSize: 40, color: 'white', opacity: 0.8 }} />
+                              </div>
+                            </>
+                          ) : (
+                            <div style={{
+                              width: '100%',
+                              height: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                            }}>
+                              <VideocamIcon sx={{ fontSize: 40, color: '#9c27b0', opacity: 0.8 }} />
+                            </div>
+                          )}
+                          <div style={{ 
+                            position: 'absolute', 
+                            bottom: '8px', 
+                            right: '8px', 
+                            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                            color: 'white',
+                            fontSize: '10px',
+                            padding: '2px 6px',
+                            borderRadius: '4px'
+                          }}>
+                            Video
+                          </div>
+                        </div>
                       ) : (
                         <div className="audio-card">
                           <AudiotrackIcon sx={{ fontSize: 40, color: '#9c27b0' }} />

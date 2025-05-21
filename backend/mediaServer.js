@@ -14,14 +14,46 @@ const VIDEOS_DIR = path.join(UPLOADS_DIR, 'videos');
 const PHOTOS_DIR = path.join(UPLOADS_DIR, 'photos');
 const AUDIO_DIR = path.join(UPLOADS_DIR, 'audio');
 const TEMP_DIR = path.join(__dirname, 'temp');
+const THUMBNAILS_DIR = path.join(UPLOADS_DIR, 'thumbnails');
 
 // Ensure all directories exist
-[UPLOADS_DIR, VIDEOS_DIR, PHOTOS_DIR, AUDIO_DIR, TEMP_DIR].forEach(dir => {
+[UPLOADS_DIR, VIDEOS_DIR, PHOTOS_DIR, AUDIO_DIR, TEMP_DIR, THUMBNAILS_DIR].forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
     console.log(`Created directory: ${dir}`);
   }
 });
+
+// Function to generate thumbnail from video using ffmpeg
+const generateVideoThumbnail = (videoPath, videoFileName) => {
+  return new Promise((resolve, reject) => {
+    try {
+      // Create thumbnail filename based on the video filename
+      const thumbnailFileName = `${path.basename(videoFileName, path.extname(videoFileName))}-thumbnail.jpg`;
+      const thumbnailPath = path.join(THUMBNAILS_DIR, thumbnailFileName);
+      
+      // Using child_process to call ffmpeg
+      const { exec } = require('child_process');
+      
+      // Generate thumbnail at 1 second mark
+      const command = `ffmpeg -i "${videoPath}" -ss 00:00:01.000 -vframes 1 "${thumbnailPath}" -y`;
+      
+      exec(command, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`Error generating thumbnail: ${error.message}`);
+          reject(error);
+          return;
+        }
+        
+        console.log(`Thumbnail generated: ${thumbnailPath}`);
+        resolve(`/api/thumbnails/${thumbnailFileName}`);
+      });
+    } catch (err) {
+      console.error(`Exception generating thumbnail: ${err.message}`);
+      reject(err);
+    }
+  });
+};
 
 // Configure multer storage for file uploads
 const storage = multer.diskStorage({
@@ -59,6 +91,7 @@ app.use('/api/videos', express.static(VIDEOS_DIR));
 app.use('/api/photos', express.static(PHOTOS_DIR));
 app.use('/api/audio', express.static(AUDIO_DIR));
 app.use('/api/temp', express.static(TEMP_DIR));
+app.use('/api/thumbnails', express.static(THUMBNAILS_DIR));
 
 // Allow preflight requests for all routes
 app.options('*', cors());
@@ -73,7 +106,7 @@ app.use((req, res, next) => {
 });
 
 // Upload endpoints
-app.post('/api/upload', upload.single('file'), (req, res) => {
+app.post('/api/upload', upload.single('file'), async (req, res) => {
   console.log('Upload endpoint hit with body:', req.body);
   console.log('Files in request:', req.files);
   console.log('File in request:', req.file);
@@ -94,16 +127,39 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     fileType = 'audio';
   }
   
-  // Return file metadata
-  res.json({
-    id: path.basename(req.file.filename).split('-')[0],
-    name: req.file.originalname,
-    path: `/api/${fileType}/${req.file.filename}`,
-    type: fileType,
-    size: req.file.size,
-    lastModified: Date.now(),
-    isTemp: false
-  });
+  try {
+    // Generate thumbnail for videos
+    let thumbnailPath = null;
+    if (fileType === 'videos') {
+      try {
+        thumbnailPath = await generateVideoThumbnail(req.file.path, req.file.filename);
+        console.log(`Generated thumbnail: ${thumbnailPath}`);
+      } catch (error) {
+        console.error('Error generating thumbnail:', error);
+        // Continue even if thumbnail generation fails
+      }
+    }
+    
+    // Use the image itself as the thumbnail for photos
+    if (fileType === 'photos') {
+      thumbnailPath = `/api/photos/${req.file.filename}`;
+    }
+    
+    // Return file metadata
+    res.json({
+      id: path.basename(req.file.filename).split('-')[0],
+      name: req.file.originalname,
+      path: `/api/${fileType}/${req.file.filename}`,
+      type: fileType,
+      size: req.file.size,
+      lastModified: Date.now(),
+      isTemp: false,
+      thumbnailPath: thumbnailPath
+    });
+  } catch (error) {
+    console.error('Error processing upload:', error);
+    res.status(500).json({ error: 'Error processing upload' });
+  }
 });
 
 // Upload temp file
@@ -168,13 +224,28 @@ app.get('/api/media', (req, res) => {
         const timestamp = file.split('-')[0];
         const originalName = file.substring(timestamp.length + 1);
         
+        // Check if there's a thumbnail for this file (for videos)
+        let thumbnailPath = null;
+        if (type === 'videos') {
+          const thumbnailFileName = `${path.basename(file, path.extname(file))}-thumbnail.jpg`;
+          const thumbnailFullPath = path.join(THUMBNAILS_DIR, thumbnailFileName);
+          
+          if (fs.existsSync(thumbnailFullPath)) {
+            thumbnailPath = `/api/thumbnails/${thumbnailFileName}`;
+          }
+        } else if (type === 'photos') {
+          // For photos, use the image itself as thumbnail
+          thumbnailPath = `/api/${type}/${file}`;
+        }
+        
         return {
           id: timestamp,
           name: originalName,
           path: `/api/${type}/${file}`,
           type: type,
           size: stats.size,
-          lastModified: parseInt(timestamp, 10)
+          lastModified: parseInt(timestamp, 10),
+          thumbnailPath: thumbnailPath
         };
       })
       .sort((a, b) => b.lastModified - a.lastModified); // Sort newest first
@@ -223,4 +294,5 @@ app.listen(PORT, () => {
   console.log(`- Photos: ${PHOTOS_DIR}`);
   console.log(`- Audio: ${AUDIO_DIR}`);
   console.log(`- Temp: ${TEMP_DIR}`);
+  console.log(`- Thumbnails: ${THUMBNAILS_DIR}`);
 });
