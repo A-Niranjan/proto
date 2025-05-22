@@ -474,6 +474,109 @@ function App() {
   const handleCloseNotification = () => {
     setNotification(prev => ({ ...prev, open: false }));
   };
+  
+  // Handle export/download of media
+  const handleExport = () => {
+    if (!selectedVideo) {
+      // Show notification if no video is selected
+      showNotification('Please select a media file to export', 'warning');
+      return;
+    }
+    
+    // Try different approaches to get the proper URL to the raw media file
+    let downloadUrl = '';
+    
+    // First check if there's a direct raw file URL available
+    if (selectedVideo.raw_url) {
+      downloadUrl = selectedVideo.raw_url;
+    }
+    // Next try the url property
+    else if (selectedVideo.url) {
+      downloadUrl = selectedVideo.url;
+    }
+    // Finally try to construct from path
+    else if (selectedVideo.path) {
+      // Use a direct file access URL structure to bypass any HTML rendering
+      // This assumes a specific API structure where /api/download/ directly serves the file
+      downloadUrl = `/api/download/${encodeURIComponent(selectedVideo.path)}`;
+    }
+    
+    if (!downloadUrl) {
+      showNotification('Download URL not available', 'error');
+      return;
+    }
+    
+    // For local files that are directly accessible, try a direct download approach
+    if (selectedVideo.file) {
+      try {
+        // If we have the actual File object available
+        const url = URL.createObjectURL(selectedVideo.file);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = selectedVideo.name || 'media-export';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+        return;
+      } catch (error) {
+        console.error('Error creating object URL from file:', error);
+        // Continue to fallback methods
+      }
+    }
+    
+    // Fix the downloadUrl path - remove any double path elements
+    // The issue might be that the path already contains /api/ and we're adding it again
+    let cleanUrl = downloadUrl;
+    if (downloadUrl.includes('/api/') && selectedVideo.path && selectedVideo.path.startsWith('/api/')) {
+      // If both the URL and the path start with /api/, fix the path to avoid duplication
+      cleanUrl = selectedVideo.path;
+    }
+    
+    // Always use fetch to get the file as a blob first, which ensures proper download
+    fetch(cleanUrl)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Network response was not ok: ${response.status}`);
+        }
+        return response.blob();
+      })
+      .then(blob => {
+        // Get the file extension from the path or URL
+        const getFileExtension = (url) => {
+          const match = url.match(/\.([0-9a-z]+)(?:[?#]|$)/i);
+          return match ? match[1] : '';
+        };
+        
+        // Try to get the extension from the path or URL
+        const fileExt = getFileExtension(selectedVideo.name || selectedVideo.path || cleanUrl);
+        
+        // Create a filename with the proper extension
+        const fileName = selectedVideo.name || `media-export${fileExt ? `.${fileExt}` : ''}`;
+        
+        // Create a blob URL for the media content
+        const blobUrl = URL.createObjectURL(blob);
+        
+        // Create an anchor element for download
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = fileName;
+        
+        // Click and clean up
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Clean up the blob URL
+        setTimeout(() => {
+          URL.revokeObjectURL(blobUrl);
+        }, 100);
+      })
+      .catch(error => {
+        console.error('Download failed:', error);
+        showNotification('Download failed', 'error');
+      });
+  };
 
   return (
     <ThemeProvider theme={theme}>
@@ -548,6 +651,7 @@ function App() {
                 color="primary"
                 startIcon={<ExportIcon />}
                 size="small"
+                onClick={handleExport}
                 sx={{
                   borderRadius: '20px',
                   textTransform: 'none',

@@ -175,6 +175,8 @@ const VideoPreview = ({ video }) => {
     }
   };
   
+
+
   // Skip forward/backward
   const skipTime = (seconds) => {
     if (!videoRef.current) return;
@@ -195,10 +197,26 @@ const VideoPreview = ({ video }) => {
     }
   };
 
-  // Listen for keyboard shortcuts
+  // Listen for keyboard shortcuts only when video container is focused
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Only handle key events if the video player is in focus or one of its children is in focus
       if (!videoRef.current) return;
+      
+      // Check if the active element is an input field or the chatbox
+      const activeElement = document.activeElement;
+      const isInputActive = activeElement.tagName === 'INPUT' || 
+                           activeElement.tagName === 'TEXTAREA' || 
+                           activeElement.isContentEditable;
+      
+      // If user is typing in an input, don't capture keyboard events
+      if (isInputActive) return;
+      
+      // Check if the event originated from the video container or if no specific input is focused
+      const isVideoContainerEvent = videoContainerRef.current && 
+        (videoContainerRef.current.contains(e.target) || e.target === document.body);
+      
+      if (!isVideoContainerEvent && activeElement !== document.body) return;
       
       switch (e.key) {
         case 'ArrowLeft': // Left Arrow
@@ -224,6 +242,7 @@ const VideoPreview = ({ video }) => {
       }
     };
     
+    // Only add the event listener to the video container element, not the entire document
     document.addEventListener('keydown', handleKeyDown);
     
     return () => {
@@ -294,7 +313,7 @@ const VideoPreview = ({ video }) => {
     const handleError = (e) => {
       console.error('Video error:', e);
     };
-    
+
     // Add event listeners
     videoElement.addEventListener('timeupdate', handleTimeUpdate);
     videoElement.addEventListener('durationchange', handleDurationChange);
