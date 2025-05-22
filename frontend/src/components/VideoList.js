@@ -668,7 +668,7 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                       e.dataTransfer.effectAllowed = 'move';
                     }}
                   >
-                    <div className="media-thumbnail">
+                    <div className="media-thumbnail" style={{ overflow: 'hidden', backgroundColor: '#121212', borderRadius: '8px' }}>
                       {(video.type === 'photos' || video.path?.match(/\.(jpg|jpeg|png|gif)$/i)) ? (
                         <img 
                           src={`http://localhost:3001${video.path}` || '/placeholder-image.jpg'}
@@ -679,7 +679,8 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                             left: 0,
                             width: '100%',
                             height: '100%',
-                            objectFit: 'cover'
+                            objectFit: 'cover',
+                            borderRadius: '8px'
                           }}
                           onError={(e) => {
                             console.error('Error loading image thumbnail', video.path);
@@ -693,8 +694,9 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                           left: 0,
                           width: '100%',
                           height: '100%',
-                          borderRadius: '12px',
-                          overflow: 'hidden'
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          backgroundColor: '#121212'
                         }}>
                           {video.thumbnailPath ? (
                             <>
@@ -705,6 +707,7 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                                   width: '100%',
                                   height: '100%',
                                   objectFit: 'cover',
+                                  borderRadius: '8px'
                                 }}
                                 onError={(e) => {
                                   console.error('Error loading video thumbnail', video.thumbnailPath);
@@ -717,12 +720,9 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                                 left: 0,
                                 width: '100%',
                                 height: '100%',
-                                backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
+                                backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                                borderRadius: '8px'
                               }}>
-                                <PlayArrowIcon sx={{ fontSize: 40, color: 'white', opacity: 0.8 }} />
                               </div>
                             </>
                           ) : (
@@ -732,23 +732,11 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                              backgroundColor: '#121212'
                             }}>
-                              <VideocamIcon sx={{ fontSize: 40, color: '#9c27b0', opacity: 0.8 }} />
                             </div>
                           )}
-                          <div style={{ 
-                            position: 'absolute', 
-                            bottom: '8px', 
-                            right: '8px', 
-                            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                            color: 'white',
-                            fontSize: '10px',
-                            padding: '2px 6px',
-                            borderRadius: '4px'
-                          }}>
-                            Video
-                          </div>
+
                         </div>
                       ) : (
                         <div className="audio-card">

@@ -34,7 +34,7 @@
   position: relative;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   width: 100%;
-  background-color: #f0f0f0;
+  background-color: #121212;
 }
 
 .media-card:hover {
@@ -45,8 +45,10 @@
 .media-thumbnail {
   position: relative;
   padding-top: 56.25%; /* 16:9 aspect ratio */
-  background-color: #f0f0f0;
+  background-color: #121212;
   width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .media-name {
@@ -160,6 +162,36 @@
 .toggle-button.active {
   background-color: rgba(156, 39, 176, 0.7);
   color: white;
+}
+
+/* Fix for thumbnail corner issues */
+.media-thumbnail {
+  position: relative;
+  padding-top: 56.25%; /* 16:9 aspect ratio */
+  background-color: #121212;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.media-thumbnail img,
+.media-thumbnail video {
+  border-radius: 8px;
+  object-fit: cover;
+  width: 100%;
+  height: 100%;
+}
+
+.media-thumbnail > div {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Completely remove default border radius behaviors that might cause white corners */
+.media-card {
+  border-radius: 8px;
+  background-color: #121212;
+  overflow: hidden;
 }
 
 /* Responsive adjustments */

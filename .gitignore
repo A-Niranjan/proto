@@ -1,4 +1,9 @@
 node_modules/
 .cache/
-uploads/
-.env
+build/
+.env*
+*.mp3
+*.jpg
+*.png
+*.mp4
+*.avi
