@@ -412,6 +412,11 @@ function App() {
     setSelectedVideo(video);
   };
 
+  // Function to clear chat messages
+  const clearChat = () => {
+    setChatMessages([]);
+  };
+
   const fetchChatResponse = async () => {
     try {
       const response = await axios.get('/api/chat/response');
@@ -681,13 +686,6 @@ function App() {
           {/* Navigation Sidebar */}
           <div className="left-sidebar">
             <div className="nav-sidebar">
-              <div className={`sidebar-icon ${activePanel === 'media' ? 'active' : ''}`} onClick={() => {
-                setActivePanel('media');
-                setMediaOpen(true);
-              }}>
-                <PermMediaIcon />
-                <span>MEDIA</span>
-              </div>
               <div className={`sidebar-icon ${activePanel === 'videos' ? 'active' : ''}`} onClick={() => {
                 setActivePanel('videos');
                 setActiveTab('videos');
@@ -809,6 +807,7 @@ function App() {
               messages={chatMessages} 
               onSendMessage={handleSendMessage} 
               isTyping={isPolling}
+              onNewChat={clearChat}
             />
           </div>
         </div> {/* End of app-body */}

@@ -72,7 +72,7 @@ const MessageText = ({ text }) => {
   );
 };
 
-const ChatBox = ({ messages, onSendMessage, isWaiting }) => {
+const ChatBox = ({ messages, onSendMessage, isWaiting, onNewChat }) => {
   const [input, setInput] = useState('');
   const [typingDots, setTypingDots] = useState(1);
   const chatEndRef = useRef(null);
@@ -125,10 +125,10 @@ const ChatBox = ({ messages, onSendMessage, isWaiting }) => {
 
   // Handle new chat
   const handleNewChat = () => {
-    // This would typically clear the messages state in the parent component
-    // For now, we'll just log it
-    console.log('New chat requested');
-    // In a real implementation, we would call a prop like onNewChat()
+    // Clear the messages in the parent component
+    if (onNewChat) {
+      onNewChat();
+    }
   };
   
   return (
