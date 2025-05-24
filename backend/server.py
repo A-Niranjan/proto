@@ -261,6 +261,11 @@ def send_message():
             elif response.startswith("RESPONSE_START"):
                 response = response[len("RESPONSE_START"):].strip()
                 
+            # Remove tool call information
+            import re
+            # Look for tool call patterns and remove them
+            response = re.sub(r'\[Gemini requested tool \'[^\']*\' with arguments: \{[^\}]*\}\]\n?', '', response)
+                
             print(f"[DEBUG] Final processed response: '{response}'")
             
             # If the response starts with a newline, remove it
