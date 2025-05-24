@@ -54,13 +54,17 @@ class MCPClient:
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
         # --- Gemini Model Initialization ---
-        self.model = genai.GenerativeModel(
-            'gemini-1.5-flash',
-            generation_config=GenerationConfig(
-                temperature=0.7
+        try:
+            self.model = genai.GenerativeModel(
+                'gemini-1.5-flash',
+                generation_config=GenerationConfig(
+                    temperature=0.7
+                )
             )
-        )
-        self.chat_session = None
+            self.chat_session = None
+        except Exception as e:
+            print(f"Error initializing Gemini model: {e}")
+            raise
         # --- End Gemini Model Initialization ---
         self.available_gemini_tools: Optional[List[GeminiTool]] = None
 
@@ -75,7 +79,8 @@ class MCPClient:
         server_params = StdioServerParameters(
             command=command,
             args=[server_script_path],
-            env=None
+            # Pass the API key in the environment to ensure it's available to subprocesses
+            env={"GOOGLE_API_KEY": GOOGLE_API_KEY} if GOOGLE_API_KEY else None
         )
 
         try:
@@ -149,13 +154,17 @@ class MCPClient:
 
                     # Extract the text content from mcp_result.content
                     extracted_text = None
-                    if (isinstance(mcp_result.content, list) and
-                            len(mcp_result.content) == 1 and
-                            type(mcp_result.content[0]).__name__ == 'TextContent' and
-                            hasattr(mcp_result.content[0], 'text')):
-                        extracted_text = mcp_result.content[0].text
+                    if hasattr(mcp_result, 'content'):
+                        if (isinstance(mcp_result.content, list) and
+                                len(mcp_result.content) == 1 and
+                                type(mcp_result.content[0]).__name__ == 'TextContent' and
+                                hasattr(mcp_result.content[0], 'text')):
+                            extracted_text = mcp_result.content[0].text
+                        else:
+                            extracted_text = str(mcp_result.content)
                     else:
-                        extracted_text = str(mcp_result.content)
+                        # Handle case where content might be directly accessible
+                        extracted_text = str(mcp_result)
 
                     # Send the result as a text part
                     tool_response_part = genai.protos.Part(
@@ -244,18 +253,9 @@ async def stdio_chat_loop(client: MCPClient):
             print(f"Processing query: {query}", flush=True)
             response = await client.process_query(query)
             
-            # Process the response to extract the actual Gemini response
-            if response.startswith("[Gemini requested tool"):
-                # This is a tool call, execute it and get the result
-                print(f"Response (tool call): {response}", flush=True)
-                
-                # For now, just return the tool call request
-                # In a real implementation, we would execute the tool and return the result
-                print(f"GEMINI_RESPONSE: {response}", flush=True)
-            else:
-                # This is a regular response, just print it
-                print(f"Response: {response}", flush=True)
-            
+            # Output the full response - this will include both tool call info and final Gemini response
+            # The response formatting is already handled in process_query
+            print(f"Response: {response}", flush=True)
             sys.stdout.flush()
             
         except Exception as e:
