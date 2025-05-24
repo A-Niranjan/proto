@@ -175,52 +175,88 @@ def send_message():
             client_process.stdin.flush()
             
             # Read response with timeout - Windows-compatible approach
+            all_output = []
+            response_lines = []
+            in_response_block = False
             response = ""
             start_time = time.time()
-            timeout = 15  # seconds
+            timeout = 60  # seconds, increased for longer outputs
             
             print("[DEBUG] Waiting for response...")
             
             # Set stdout to non-blocking mode
             msvcrt.setmode(client_process.stdout.fileno(), os.O_BINARY)
             
-            # Wait for response with timeout
+            # Read all output from the process until we see the complete response
             while time.time() - start_time < timeout:
                 # Check if process has exited
-                if client_process.poll() is not None:
+                if client_process.poll() is not None and len(all_output) > 0:
                     print(f"[DEBUG] Process exited with code {client_process.returncode}")
                     stderr = client_process.stderr.read()
                     if stderr:
                         print(f"[DEBUG] Process stderr: {stderr}")
                     break
                 
-                # Simple approach: just try to read a line
+                # Read a line from stdout
                 try:
                     line = client_process.stdout.readline().strip()
                     if line:
                         print(f"[DEBUG] Got line: '{line}'")
-                        # Only capture lines that start with 'GEMINI_RESPONSE:'
-                        if line.startswith("GEMINI_RESPONSE:"):
-                            # Extract the actual response (remove the prefix)
-                            response = line[len("GEMINI_RESPONSE:"):].strip()
-                            print(f"[DEBUG] Got Gemini response: '{response}'")
-                            break
-                        elif line.startswith("Response:"):
-                            # Extract the actual response from the line starting with 'Response:'
-                            parts = line.split(":", 1)
-                            if len(parts) > 1 and parts[1].strip().startswith("GEMINI_RESPONSE:"):
-                                response = parts[1].strip()[len("GEMINI_RESPONSE:"):].strip()
-                                print(f"[DEBUG] Got Gemini response from 'Response:' line: '{response}'")
-                                break
-                        else:
-                            # Skip all other debug messages
-                            print(f"[DEBUG] Skipping message, waiting for actual response...")
+                        
+                        # Skip common debug messages
+                        if line.startswith("MCP Client in stdio mode") or \
+                           line.startswith("Received query:") or \
+                           line.startswith("Processing query:"):
+                            print(f"[DEBUG] Skipping debug message: '{line}'")
                             continue
+                        
+                        # Look for response markers
+                        if line == "RESPONSE_START":
+                            print("[DEBUG] Found response start marker")
+                            in_response_block = True
+                            continue
+                        elif line == "RESPONSE_END":
+                            print("[DEBUG] Found response end marker")
+                            in_response_block = False
+                            # We've got the complete response, exit the loop
+                            break
+                        elif in_response_block:
+                            # Add this line to our response
+                            response_lines.append(line)
+                            print(f"[DEBUG] Added to response: '{line}'")
+                        else:
+                            # Add to general output for fallback
+                            all_output.append(line)
+                    else:
+                        # No data, check if process is done
+                        if client_process.poll() is not None:
+                            break
                 except Exception as e:
                     print(f"[DEBUG] Error reading from stdout: {e}")
                 
                 # Sleep a bit to avoid busy waiting
                 time.sleep(0.1)
+            
+            # Construct the response from the collected lines
+            if response_lines:
+                response = "\n".join(response_lines)
+                print(f"[DEBUG] Constructed multi-line response ({len(response_lines)} lines)")
+            elif all_output:
+                # Fallback: use collected output if no marked response was found
+                filtered_output = [line for line in all_output 
+                                 if not line.startswith("MCP Client") and 
+                                 not line.startswith("Received query:") and 
+                                 not line.startswith("Processing query:")]
+                
+                response = "\n".join(filtered_output)
+                print(f"[DEBUG] Using fallback response from collected output")
+                
+            # Clean up any response prefixes that might have slipped through
+            if response.startswith("GEMINI_RESPONSE:"):
+                response = response[len("GEMINI_RESPONSE:"):].strip()
+                
+            print(f"[DEBUG] Final processed response: '{response}'")
+            
             
             # Clean up
             if client_process.poll() is None:

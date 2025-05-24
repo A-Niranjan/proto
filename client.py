@@ -194,13 +194,17 @@ class MCPClient:
 
             # After handling tool calls, get the final text response
             final_text = "".join(part.text for part in response.candidates[0].content.parts if hasattr(part, 'text'))
-            # Add a prefix to make it clear this is the final response from Gemini
-            final_text_parts.append(f"GEMINI_RESPONSE: {final_text}")
+            # Add the final response from Gemini without a prefix
+            final_text_parts.append(final_text)
 
         except Exception as e:
             return f"Error processing query with Gemini: {str(e)}"
 
-        return "\n".join(final_text_parts)
+        # Format multi-line responses with a special marker to help the server capture them properly
+        response_text = "\n".join(final_text_parts)
+        
+        # Add start and end markers for multi-line responses
+        return f"RESPONSE_START\n{response_text}\nRESPONSE_END"
 
     async def chat_loop(self):
         """Runs an interactive chat loop."""
