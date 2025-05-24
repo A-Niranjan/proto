@@ -200,10 +200,10 @@ class MCPClient:
         except Exception as e:
             return f"Error processing query with Gemini: {str(e)}"
 
-        # Format multi-line responses with a special marker to help the server capture them properly
+        # Format multi-line responses with special markers to help the server capture them properly
         response_text = "\n".join(final_text_parts)
         
-        # Add start and end markers for multi-line responses
+        # Add start and end markers for multi-line responses, but don't include any prefix like "Response:"
         return f"RESPONSE_START\n{response_text}\nRESPONSE_END"
 
     async def chat_loop(self):

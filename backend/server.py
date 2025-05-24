@@ -254,8 +254,18 @@ def send_message():
             # Clean up any response prefixes that might have slipped through
             if response.startswith("GEMINI_RESPONSE:"):
                 response = response[len("GEMINI_RESPONSE:"):].strip()
+            # Remove Response: RESPONSE_START prefix
+            if response.startswith("Response: RESPONSE_START"):
+                response = response[len("Response: RESPONSE_START"):].strip()
+            # Remove just RESPONSE_START prefix if present
+            elif response.startswith("RESPONSE_START"):
+                response = response[len("RESPONSE_START"):].strip()
                 
             print(f"[DEBUG] Final processed response: '{response}'")
+            
+            # If the response starts with a newline, remove it
+            if response.startswith("\n"):
+                response = response[1:]
             
             
             # Clean up
