@@ -210,14 +210,20 @@ def send_message():
                             print(f"[DEBUG] Skipping debug message: '{line}'")
                             continue
                         
-                        # Look for response markers
-                        if line == "RESPONSE_START":
+                        # Check for response line
+                        if line.startswith("Response: RESPONSE_START"):
                             print("[DEBUG] Found response start marker")
                             in_response_block = True
                             continue
                         elif line == "RESPONSE_END":
                             print("[DEBUG] Found response end marker")
                             in_response_block = False
+                            # We've got the complete response, exit the loop
+                            break
+                        elif line.startswith("Response: Available tools:"):
+                            # Direct tool listing response
+                            response = line[len("Response: "):]
+                            print(f"[DEBUG] Got direct tools response: '{response}'")
                             # We've got the complete response, exit the loop
                             break
                         elif in_response_block:

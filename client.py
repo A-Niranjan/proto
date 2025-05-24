@@ -114,6 +114,25 @@ class MCPClient:
             return "Error: Not connected to an MCP server."
         if not self.chat_session:
             return "Error: Gemini chat session not initialized."
+            
+        # Handle special queries directly
+        query_lower = query.lower().strip()
+        if query_lower in ["list tools", "tools", "tools?", "what tools", "available tools", "show tools"]:
+            # If tools are requested, generate a simple list without all the parameter details
+            if self.available_gemini_tools and len(self.available_gemini_tools) > 0:
+                tool_names = []
+                for tool_container in self.available_gemini_tools:
+                    for func_decl in tool_container.function_declarations:
+                        tool_names.append(f"`{func_decl.name}`")
+                
+                if tool_names:
+                    tools_list = f"Available tools: {', '.join(tool_names)}"
+                    # Wrap the response in the markers expected by the server
+                    return f"RESPONSE_START\n{tools_list}\nRESPONSE_END"
+            
+            # Fallback if we can't extract tool names
+            fallback_msg = "Please ask Gemini about the available tools for more information."
+            return f"RESPONSE_START\n{fallback_msg}\nRESPONSE_END"
 
         final_text_parts = []
 
