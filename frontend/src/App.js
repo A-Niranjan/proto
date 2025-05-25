@@ -306,18 +306,39 @@ function App() {
     fetchVideos();
   }, []);
 
+  // Track the latest request being processed
+  const [currentRequestId, setCurrentRequestId] = useState(null);
+  
   // Start polling for chat responses when needed
   useEffect(() => {
-    let pollingInterval;
+    let pollingTimeout;
     
+    const pollForResponse = async () => {
+      if (!isPolling) return;
+      
+      try {
+        await fetchChatResponse();
+        
+        // Only set up the next poll if we're still waiting for a response
+        if (isPolling) {
+          pollingTimeout = setTimeout(pollForResponse, 1000);
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+        // If there's an error, still continue polling but with a longer delay
+        if (isPolling) {
+          pollingTimeout = setTimeout(pollForResponse, 2000);
+        }
+      }
+    };
+    
+    // Start polling if needed
     if (isPolling) {
-      pollingInterval = setInterval(() => {
-        fetchChatResponse();
-      }, 1000);
+      pollForResponse();
     }
     
     return () => {
-      if (pollingInterval) clearInterval(pollingInterval);
+      if (pollingTimeout) clearTimeout(pollingTimeout);
     };
   }, [isPolling]);
 
@@ -419,28 +440,44 @@ function App() {
     setChatMessages([]);
   };
 
-  // Track the last response timestamp we've processed
-  const [lastResponseTimestamp, setLastResponseTimestamp] = useState(0);
+  // Track the request IDs we've already processed
+  const [processedRequestIds, setProcessedRequestIds] = useState(new Set());
   
   const fetchChatResponse = async () => {
     try {
+      // If we're not currently waiting for a response, don't poll
+      if (!isPolling) return;
+      
       const response = await axios.get('/api/chat/response');
       
       if (response.data.role === 'assistant') {
-        // Check if this is a new response we haven't seen yet
-        const responseTimestamp = response.data.timestamp || 0;
+        // Check if we have a request ID and haven't processed this response yet
+        const requestId = response.data.request_id;
         
-        if (responseTimestamp > lastResponseTimestamp) {
-          console.log(`New response received with timestamp: ${responseTimestamp}`);
+        // Only process this response if:
+        // 1. It has a request ID that we haven't seen before, OR
+        // 2. It matches our current request ID (which means it's the response we're waiting for)
+        if (requestId && !processedRequestIds.has(requestId)) {
+          console.log(`New response received with request ID: ${requestId}`);
           
-          // Update our tracking of the last seen response
-          setLastResponseTimestamp(responseTimestamp);
+          // Update our tracking of processed request IDs
+          setProcessedRequestIds(prev => new Set([...prev, requestId]));
           
-          // Add the new message to chat
-          setChatMessages(prev => [...prev, response.data]);
+          // Add the new message to chat if it's not already there
+          setChatMessages(prev => {
+            // Check if this message is already in the chat history
+            const messageExists = prev.some(msg => 
+              msg.role === 'assistant' && msg.request_id === requestId);
+              
+            // Only add if it's not already there
+            return messageExists ? prev : [...prev, response.data];
+          });
           
-          // Stop polling once we have a response
-          setIsPolling(false);
+          // Stop polling once we have a response for our current request
+          if (requestId === currentRequestId) {
+            setIsPolling(false);
+            console.log(`Got response for current request: ${requestId}`);
+          }
           
           // If the response contains a video name, refresh the videos list
           // and check if we need to update the selected video
@@ -449,8 +486,19 @@ function App() {
               response.data.content.includes('edited')) {
             await fetchVideos();
           }
+        } else if (!requestId) {
+          console.log('Response missing request ID, using timestamp as fallback');
+          // Fallback to timestamp if no request ID (for backward compatibility)
+          const responseTimestamp = response.data.timestamp || 0;
+          const lastMessage = chatMessages[chatMessages.length - 1];
+          const lastTimestamp = lastMessage?.timestamp || 0;
+          
+          if (responseTimestamp > lastTimestamp) {
+            setChatMessages(prev => [...prev, response.data]);
+            setIsPolling(false);
+          }
         } else {
-          console.log(`Ignoring duplicate response with timestamp: ${responseTimestamp}`);
+          console.log(`Ignoring duplicate response with request ID: ${requestId}`);
         }
       }
     } catch (error) {
@@ -465,11 +513,12 @@ function App() {
       'convert', 'merge', 'overlay', 'transform', 'process', 'get video info'
     ];
     
+    // Placeholder for the processed message that might include the video path
     let processedMessage = message;
     let includesVideoPath = false;
     
     // Check if the message already includes a file path
-    const hasFilePath = /[A-Za-z]:\\|[A-Za-z]:\//.test(message);
+    const hasFilePath = /[A-Za-z]:\\|[A-Za-z]:/.test(message);
     
     // If we have a selected video and the message includes a video command
     if (selectedVideo) {
@@ -501,16 +550,31 @@ function App() {
     setIsPolling(true);
     
     try {
+      // Generate a unique request ID for this message so we can track it
+      const requestId = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;  
+      setCurrentRequestId(requestId); // Store this request ID
+      
+      console.log(`Sending message with request ID: ${requestId}`);
+      
       // Send the processed message (with video path if applicable)
       const response = await axios.post('/api/chat', { 
         message: processedMessage,
         videoContext: includesVideoPath ? selectedVideo : null
       });
       
-      // If response is successful, start polling for assistant's response
+      // If we get an immediate response (rare but possible)
       if (response.data && response.data.assistant) {
-        setChatMessages(prev => [...prev, response.data.assistant]);
-        
+        // First check if we already have this response by its request ID
+        const existingMsgIndex = chatMessages.findIndex(msg => 
+          msg.request_id === response.data.assistant.request_id);
+          
+        if (existingMsgIndex === -1) {
+          // Add to chat messages if it's new
+          setChatMessages(prev => [...prev, response.data.assistant]);
+          // Add to processed IDs
+          setProcessedRequestIds(prev => new Set([...prev, response.data.assistant.request_id]));
+        }
+      
         // Check if the response includes an output video path
         const assistantContent = response.data.assistant.content;
         if (assistantContent) {

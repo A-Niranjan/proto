@@ -232,9 +232,21 @@ const ChatBox = ({ messages, onSendMessage, isWaiting, onNewChat }) => {
             </Typography>
           </Box>
         ) : (
-          messages.map((msg, idx) => {
-            const isLastMessage = idx === messages.length - 1;
-            const showAvatar = idx === 0 || messages[idx-1].role !== msg.role;
+          // Filter out duplicate messages based on content and role
+          messages.filter((msg, idx, self) => {
+            // Keep this message if it's the first occurrence or if it's from a different sender than the previous one
+            if (idx === 0) return true;
+            
+            // Check if this exact same message (by content and sender) appears earlier in the chat
+            const prevSameContentIdx = self.findIndex((m, i) => {
+              return i < idx && m.role === msg.role && m.content === msg.content;
+            });
+            
+            // If we found an earlier occurrence, filter this one out
+            return prevSameContentIdx === -1;
+          }).map((msg, idx, filteredMessages) => {
+            const isLastMessage = idx === filteredMessages.length - 1;
+            const showAvatar = idx === 0 || filteredMessages[idx-1].role !== msg.role;
             
             return (
               <div 

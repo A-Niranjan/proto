@@ -196,8 +196,16 @@ def send_message():
     if not message:
         return jsonify({'error': 'Empty message'}), 400
     
-    # Add user message to chat history
-    user_message = {'role': 'user', 'content': message, 'timestamp': time.time()}
+    # Generate a unique request ID for this message
+    request_id = str(int(time.time() * 1000)) + '-' + str(hash(message) % 10000)
+    
+    # Add user message to chat history with request ID
+    user_message = {
+        'role': 'user', 
+        'content': message, 
+        'timestamp': time.time(),
+        'request_id': request_id
+    }
     chat_history.append(user_message)
     
     # If MCP process is not running, start it
@@ -349,10 +357,12 @@ def send_message():
         # Add the response to chat history if we got one
         if response:
             print(f"[DEBUG] Got response: '{response}'")
+            # Include the same request_id from the user message
             assistant_message = {
                 'role': 'assistant',
                 'content': response,
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'request_id': request_id  # Pass the request ID to link question and answer
             }
             chat_history.append(assistant_message)
         else:
@@ -361,7 +371,8 @@ def send_message():
             assistant_message = {
                 'role': 'assistant',
                 'content': "I'm sorry, I couldn't process your request. Please try again.",
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'request_id': request_id  # Include request ID even for error responses
             }
             chat_history.append(assistant_message)
         
