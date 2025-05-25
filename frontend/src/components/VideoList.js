@@ -671,7 +671,7 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                     <div className="media-thumbnail" style={{ overflow: 'hidden', backgroundColor: '#121212', borderRadius: '8px' }}>
                       {(video.type === 'photos' || video.path?.match(/\.(jpg|jpeg|png|gif)$/i)) ? (
                         <img 
-                          src={`http://localhost:3001${video.path}` || '/placeholder-image.jpg'}
+                          src={`http://localhost:8001${video.path}` || '/placeholder-image.jpg'}
                           alt={video.name}
                           style={{
                             position: 'absolute',
@@ -701,7 +701,7 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
                           {video.thumbnailPath ? (
                             <>
                               <img 
-                                src={`http://localhost:3001${video.thumbnailPath}`} 
+                                src={`http://localhost:8001${video.thumbnailPath}`} 
                                 alt={video.name}
                                 style={{
                                   width: '100%',

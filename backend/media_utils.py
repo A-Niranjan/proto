@@ -9,9 +9,10 @@ TEMP_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp')
 VIDEOS_FOLDER = os.path.join(UPLOADS_FOLDER, 'videos')
 PHOTOS_FOLDER = os.path.join(UPLOADS_FOLDER, 'photos')
 AUDIO_FOLDER = os.path.join(UPLOADS_FOLDER, 'audio')
+THUMBNAILS_FOLDER = os.path.join(UPLOADS_FOLDER, 'thumbnails')
 
 # Create necessary directories if they don't exist
-for folder in [UPLOADS_FOLDER, TEMP_FOLDER, VIDEOS_FOLDER, PHOTOS_FOLDER, AUDIO_FOLDER]:
+for folder in [UPLOADS_FOLDER, TEMP_FOLDER, VIDEOS_FOLDER, PHOTOS_FOLDER, AUDIO_FOLDER, THUMBNAILS_FOLDER]:
     if not os.path.exists(folder):
         os.makedirs(folder)
         print(f"Created directory: {folder}")
@@ -20,6 +21,9 @@ for folder in [UPLOADS_FOLDER, TEMP_FOLDER, VIDEOS_FOLDER, PHOTOS_FOLDER, AUDIO_
 VIDEO_EXTENSIONS = ['.mp4', '.mov', '.avi', '.webm', '.mkv']
 PHOTO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
 AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.aac', '.m4a']
+
+# Import subprocess for running ffmpeg
+import subprocess
 
 def get_media_type(filename):
     """Determine media type based on file extension"""
@@ -34,6 +38,55 @@ def get_media_type(filename):
     else:
         # Default to video if unknown
         return 'videos'
+
+def generate_thumbnail(video_path, timestamp=2):
+    """Generate a thumbnail for a video file using ffmpeg
+    
+    Args:
+        video_path (str): Path to the video file
+        timestamp (int): Timestamp in seconds to capture for the thumbnail
+        
+    Returns:
+        str: Path to the generated thumbnail, or None if generation failed
+    """
+    try:
+        # Extract filename without extension
+        video_filename = os.path.basename(video_path)
+        base_name = os.path.splitext(video_filename)[0]
+        
+        # Create thumbnail filename
+        thumbnail_filename = f"{base_name}-thumbnail.jpg"
+        thumbnail_path = os.path.join(THUMBNAILS_FOLDER, thumbnail_filename)
+        
+        # Ensure thumbnails directory exists
+        os.makedirs(THUMBNAILS_FOLDER, exist_ok=True)
+        
+        # Use ffmpeg to generate the thumbnail
+        # -y: Overwrite output file if it exists
+        # -ss: Seek to timestamp
+        # -i: Input file
+        # -vframes 1: Extract one frame
+        # -q:v 2: Quality (lower is better, 2-31 range)
+        # -f image2: Force image2 format
+        cmd = [
+            'ffmpeg', '-y', '-ss', str(timestamp), 
+            '-i', video_path, '-vframes', '1', 
+            '-q:v', '2', '-f', 'image2', thumbnail_path
+        ]
+        
+        # Run the command with a timeout
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate(timeout=30)
+        
+        # Check if thumbnail was created successfully
+        if os.path.exists(thumbnail_path) and os.path.getsize(thumbnail_path) > 0:
+            return f"/api/thumbnails/{thumbnail_filename}"
+        else:
+            print(f"Error creating thumbnail: {stderr.decode() if stderr else 'Unknown error'}")
+            return None
+    except Exception as e:
+        print(f"Error generating thumbnail: {str(e)}")
+        return None
 
 def get_file_path_from_url(url):
     """Convert an API URL to a file system path"""
@@ -59,6 +112,11 @@ def get_file_path_from_url(url):
     if '/api/temp/' in url:
         filename = url.split('/api/temp/')[-1]
         return os.path.join(TEMP_FOLDER, filename)
+        
+    # Handle thumbnail paths
+    if '/api/thumbnails/' in url:
+        filename = url.split('/api/thumbnails/')[-1]
+        return os.path.join(THUMBNAILS_FOLDER, filename)
         
     return url
 
@@ -109,7 +167,8 @@ def save_media_file(file, is_temp=False):
             print(f"WARNING: File does not exist after save: {file_path}")
             file_size = 0
         
-        return {
+        # Result object to return
+        result = {
             'id': str(timestamp),
             'name': filename,
             'path': media_url,
@@ -118,6 +177,18 @@ def save_media_file(file, is_temp=False):
             'lastModified': timestamp,
             'isTemp': is_temp
         }
+        
+        # Generate thumbnail for videos
+        if media_type == 'videos' and not is_temp:
+            print(f"Generating thumbnail for video: {file_path}")
+            thumbnail_path = generate_thumbnail(file_path)
+            if thumbnail_path:
+                result['thumbnailPath'] = thumbnail_path
+                print(f"Thumbnail generated: {thumbnail_path}")
+            else:
+                print("Failed to generate thumbnail")
+                
+        return result
     except Exception as e:
         print(f"ERROR saving file {filename}: {str(e)}")
         # Re-raise the exception for handling in the route
@@ -169,14 +240,32 @@ def get_all_media():
                     file_path = os.path.join(directory, filename)
                     stats = os.stat(file_path)
                     
-                    media_list.append({
+                    # Create base media item
+                    media_item = {
                         'id': str(timestamp),
                         'name': original_name,
                         'path': f"/api/{media_type}/{filename}",
                         'type': media_type,
                         'size': stats.st_size,
                         'lastModified': timestamp
-                    })
+                    }
+                    
+                    # Add thumbnail for videos
+                    if media_type == 'videos':
+                        # Check if thumbnail exists
+                        base_name = os.path.splitext(filename)[0]
+                        thumbnail_filename = f"{base_name}-thumbnail.jpg"
+                        thumbnail_path = os.path.join(THUMBNAILS_FOLDER, thumbnail_filename)
+                        
+                        if os.path.exists(thumbnail_path):
+                            media_item['thumbnailPath'] = f"/api/thumbnails/{thumbnail_filename}"
+                        else:
+                            # Generate thumbnail if it doesn't exist
+                            thumbnail_url = generate_thumbnail(file_path)
+                            if thumbnail_url:
+                                media_item['thumbnailPath'] = thumbnail_url
+                    
+                    media_list.append(media_item)
                 except Exception as e:
                     print(f"Error processing {filename}: {e}")
         

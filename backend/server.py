@@ -10,7 +10,7 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import uvicorn
 from a2wsgi import WSGIMiddleware
-from media_utils import save_media_file, delete_temp_file, clean_temp_files, get_all_media, VIDEOS_FOLDER, PHOTOS_FOLDER, AUDIO_FOLDER, TEMP_FOLDER, get_file_path_from_url
+from media_utils import save_media_file, delete_temp_file, clean_temp_files, get_all_media, VIDEOS_FOLDER, PHOTOS_FOLDER, AUDIO_FOLDER, TEMP_FOLDER, THUMBNAILS_FOLDER, get_file_path_from_url
 
 # Create Flask app
 app = Flask(__name__, static_folder='../frontend/build')
@@ -65,6 +65,11 @@ def get_audio(filename):
 def get_temp_file(filename):
     """Serve a temporary file"""
     return send_from_directory(TEMP_FOLDER, filename)
+
+@app.route('/api/thumbnails/<filename>', methods=['GET'])
+def get_thumbnail(filename):
+    """Serve a thumbnail file"""
+    return send_from_directory(THUMBNAILS_FOLDER, filename)
 
 @app.route('/api/upload', methods=['POST'])
 def upload_media():
