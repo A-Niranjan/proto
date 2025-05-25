@@ -219,6 +219,58 @@ function App() {
     }
   };
   
+  // Load a specific video into the preview by its filename or pattern
+  const loadVideoByFilename = async (filenamePattern, retryCount = 0) => {
+    console.log(`Attempting to load video matching pattern: ${filenamePattern}`);
+    
+    // Force a refresh of media first
+    const mediaList = await loadServerMedia();
+    
+    if (!mediaList || !mediaList.videos || mediaList.videos.length === 0) {
+      console.log('No videos available in media list');
+      if (retryCount < 3) {
+        console.log(`Retrying in 1 second (attempt ${retryCount + 1}/3)`);
+        setTimeout(() => loadVideoByFilename(filenamePattern, retryCount + 1), 1000);
+      }
+      return false;
+    }
+    
+    console.log(`Searching through ${mediaList.videos.length} videos for match`);
+    
+    // Try exact match first
+    let video = mediaList.videos.find(v => v.name === filenamePattern);
+    
+    // If no exact match, try to find by includes
+    if (!video) {
+      video = mediaList.videos.find(v => v.name.includes(filenamePattern));
+    }
+    
+    // If still no match, try matching just the base name (without the timestamp prefix)
+    if (!video && filenamePattern.includes('-')) {
+      const baseNameParts = filenamePattern.split('-');
+      if (baseNameParts.length > 1) {
+        const baseName = baseNameParts.slice(1).join('-');
+        video = mediaList.videos.find(v => v.name.includes(baseName));
+      }
+    }
+    
+    if (video) {
+      console.log(`Found matching video: ${video.name}`);
+      // Add isDropped flag so it shows in the preview
+      video.isDropped = true;
+      onVideoSelect(video);
+      showNotification(`Loaded video: ${video.name}`, 'success');
+      return true;
+    } else {
+      console.log('No matching video found');
+      if (retryCount < 3) {
+        console.log(`Retrying in 1 second (attempt ${retryCount + 1}/3)`);
+        setTimeout(() => loadVideoByFilename(filenamePattern, retryCount + 1), 1000);
+      }
+      return false;
+    }
+  };
+  
   // Load saved media from server on component mount
   useEffect(() => {
     loadServerMedia();
@@ -578,39 +630,44 @@ function App() {
         // Check if the response includes an output video path
         const assistantContent = response.data.assistant.content;
         if (assistantContent) {
-          // Look for output file paths in the response
+          // Look for output file paths in the response - enhance pattern matching for more cases
           const outputPathMatch = assistantContent.match(/output(?:Path|File)\s*:\s*"?([^"\s,\n]+)"?/i) ||
-                                assistantContent.match(/saved(?:\s+to)?\s*:?\s*"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
-                                assistantContent.match(/successfully\s+(?:created|generated|processed)\s+"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i);
+                                assistantContent.match(/saved(?:\s+(?:as|to))?\s*:?\s*"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
+                                assistantContent.match(/successfully\s+(?:created|generated|processed|trimmed|converted|saved)\s+(?:as\s+)?"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
+                                assistantContent.match(/(?:trimmed|processed|exported|created).*?(?:saved\s+as|as)\s+"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
+                                assistantContent.match(/"([^"\s,\n]+_trimmed\.(?:mp4|mov|avi|webm|mkv))"/i);
           
           if (outputPathMatch && outputPathMatch[1]) {
             const outputPath = outputPathMatch[1];
             console.log(`Detected output video path: ${outputPath}`);
             
-            // Load the newly created video
+            // Get just the filename regardless of path format
+            let fileName = outputPath;
+            // If it has path separators, extract just the filename
+            if (outputPath.includes('\\') || outputPath.includes('/')) {
+              fileName = outputPath.split(/[\\/]/).pop(); // Get the filename
+            }
+            console.log(`Looking for processed video with filename: ${fileName}`);
+            
             try {
-              // Force a refresh of media files
-              await loadServerMedia();
+              // Use our dedicated video loading function with better retry logic
+              loadVideoByFilename(fileName);
               
-              // Find the video in the updated list
-              const fileName = outputPath.split(/[\\/]/).pop(); // Get the filename
-              const video = uploadedMedia.videos.find(v => v.url.includes(fileName));
+              // Also check for patterns like _trimmed suffix if the filename contains them
+              if (fileName.includes('_trimmed')) {
+                const baseName = fileName.split('_trimmed')[0];
+                console.log(`Also looking for video with base name: ${baseName} plus _trimmed suffix`);
+                setTimeout(() => {
+                  loadVideoByFilename(baseName + '_trimmed');
+                }, 500);
+              }
               
-              if (video) {
-                // Add isDropped flag so it shows in the preview
-                video.isDropped = true;
-                onVideoSelect(video);
-                showNotification(`Loaded processed video: ${fileName}`, 'success');
-              } else {
-                // If we couldn't find it, try again after a delay
-                setTimeout(async () => {
-                  const refreshedMedia = await loadServerMedia();
-                  const video = refreshedMedia.videos.find(v => v.url.includes(fileName));
-                  if (video) {
-                    video.isDropped = true;
-                    onVideoSelect(video);
-                    showNotification(`Loaded processed video: ${fileName}`, 'success');
-                  }
+              // Special case for timestamp-prefixed filenames
+              if (fileName.match(/^\d+\-/)) {
+                const baseNameWithoutTimestamp = fileName.split('-').slice(1).join('-');
+                console.log(`Also looking for video with name: ${baseNameWithoutTimestamp}`);
+                setTimeout(() => {
+                  loadVideoByFilename(baseNameWithoutTimestamp);
                 }, 1000);
               }
             } catch (error) {
