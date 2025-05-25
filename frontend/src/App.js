@@ -562,8 +562,18 @@ function App() {
     // Check if this is a video-related command and we have a selected video
     const videoCommands = [
       'analyze', 'get info', 'trim', 'extract', 'split', 'fade', 'add watermark',
-      'convert', 'merge', 'overlay', 'transform', 'process', 'get video info'
+      'convert', 'merge', 'overlay', 'transform', 'process', 'get video info',
+      'filter', 'apply filter', 'batman filter', 'apply batman filter', 'blur', 'sharpen', 'rotate',
+      'flip', 'mirror', 'crop', 'resize', 'adjust', 'speed', 'slow', 'fast', 'reverse',
+      'effect', 'color', 'brightness', 'contrast', 'saturation', 'hue'
     ];
+  
+    // Exclusion list - commands that should NOT get a video path even if they match video commands
+    const pathExclusionCommands = [
+      'list filter', 'list filters', 'list filter templates', 'show filters',
+      'available filters', 'what filters', 'list available filters',
+      'list effects', 'show effects', 'available effects', 'help'
+    ]; 
     
     // Placeholder for the processed message that might include the video path
     let processedMessage = message;
@@ -577,7 +587,10 @@ function App() {
       const lowerMessage = message.toLowerCase();
       const isVideoCommand = videoCommands.some(cmd => lowerMessage.includes(cmd));
       
-      if (isVideoCommand) {
+      // Check if this is a command that should be excluded from getting a video path
+      const shouldExclude = pathExclusionCommands.some(cmd => lowerMessage.includes(cmd));
+      
+      if (isVideoCommand && !shouldExclude) {
         // Whether or not we already have a file path, we'll ensure we use the local file path
         // from the server rather than the API URL path
         includesVideoPath = true;
