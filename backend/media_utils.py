@@ -35,6 +35,33 @@ def get_media_type(filename):
         # Default to video if unknown
         return 'videos'
 
+def get_file_path_from_url(url):
+    """Convert an API URL to a file system path"""
+    if not url or not isinstance(url, str):
+        return url
+        
+    # Handle video paths
+    if '/api/videos/' in url:
+        filename = url.split('/api/videos/')[-1]
+        return os.path.join(VIDEOS_FOLDER, filename)
+        
+    # Handle photo paths
+    if '/api/photos/' in url:
+        filename = url.split('/api/photos/')[-1]
+        return os.path.join(PHOTOS_FOLDER, filename)
+        
+    # Handle audio paths
+    if '/api/audio/' in url:
+        filename = url.split('/api/audio/')[-1]
+        return os.path.join(AUDIO_FOLDER, filename)
+        
+    # Handle temp paths
+    if '/api/temp/' in url:
+        filename = url.split('/api/temp/')[-1]
+        return os.path.join(TEMP_FOLDER, filename)
+        
+    return url
+
 def save_media_file(file, is_temp=False):
     """Save a media file to the appropriate directory"""
     filename = secure_filename(file.filename)

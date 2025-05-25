@@ -10,7 +10,7 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import uvicorn
 from a2wsgi import WSGIMiddleware
-from media_utils import save_media_file, delete_temp_file, clean_temp_files, get_all_media, VIDEOS_FOLDER, PHOTOS_FOLDER, AUDIO_FOLDER, TEMP_FOLDER
+from media_utils import save_media_file, delete_temp_file, clean_temp_files, get_all_media, VIDEOS_FOLDER, PHOTOS_FOLDER, AUDIO_FOLDER, TEMP_FOLDER, get_file_path_from_url
 
 # Create Flask app
 app = Flask(__name__, static_folder='../frontend/build')
@@ -136,13 +136,62 @@ def clean_all_temp_media():
 def get_chat_history():
     return jsonify(chat_history)
 
+# Helper function to convert API URLs to file system paths
+def convert_api_url_to_path(url):
+    """Convert an API URL like /api/videos/filename to a file system path"""
+    if not url or not isinstance(url, str):
+        return url
+        
+    # Handle video paths
+    if '/api/videos/' in url:
+        filename = url.split('/api/videos/')[-1]
+        return os.path.join(VIDEOS_FOLDER, filename)
+        
+    # Handle photo paths
+    if '/api/photos/' in url:
+        filename = url.split('/api/photos/')[-1]
+        return os.path.join(PHOTOS_FOLDER, filename)
+        
+    # Handle audio paths
+    if '/api/audio/' in url:
+        filename = url.split('/api/audio/')[-1]
+        return os.path.join(AUDIO_FOLDER, filename)
+        
+    # Handle temp paths
+    if '/api/temp/' in url:
+        filename = url.split('/api/temp/')[-1]
+        return os.path.join(TEMP_FOLDER, filename)
+        
+    return url
+
 @app.route('/api/chat', methods=['POST'])
 def send_message():
     global mcp_process
     
     data = request.json
     message = data.get('message', '')
+    video_context = data.get('videoContext', None)
     print(f"\n[DEBUG] Received message: '{message}'")
+    
+    # If we have video context, make sure to convert API paths to file system paths
+    if video_context:
+        print(f"[DEBUG] With video context: {video_context}")
+        
+        # Convert the URL path to a file system path
+        if 'path' in video_context and video_context['path']:
+            original_path = video_context['path']
+            file_system_path = convert_api_url_to_path(original_path)
+            
+            # Update the message to use the file system path instead of the URL
+            if original_path in message:
+                message = message.replace(original_path, file_system_path)
+                print(f"[DEBUG] Updated message with file system path: '{message}'")
+            # If the path isn't in the message, we may need to append it
+            elif not any(path in message for path in ['/api/', 'E:', 'C:', '/']):
+                # Replace any trailing dots or spaces
+                message = message.rstrip('. ')
+                message = f"{message} {file_system_path}"
+                print(f"[DEBUG] Appended file system path to message: '{message}'")
     
     if not message:
         return jsonify({'error': 'Empty message'}), 400
@@ -202,35 +251,24 @@ def send_message():
                     line = client_process.stdout.readline().strip()
                     if line:
                         print(f"[DEBUG] Got line: '{line}'")
-                        
-                        # Skip common debug messages
-                        if line.startswith("MCP Client in stdio mode") or \
-                           line.startswith("Received query:") or \
-                           line.startswith("Processing query:"):
-                            print(f"[DEBUG] Skipping debug message: '{line}'")
-                            continue
-                        
-                        # Check for response line
-                        if line.startswith("Response: RESPONSE_START"):
+                    
+                        # Check for response markers
+                        if line == "Response: RESPONSE_START":
                             print("[DEBUG] Found response start marker")
                             in_response_block = True
                             continue
                         elif line == "RESPONSE_END":
                             print("[DEBUG] Found response end marker")
                             in_response_block = False
-                            # We've got the complete response, exit the loop
                             break
-                        elif line.startswith("Response: Available tools:"):
-                            # Direct tool listing response
-                            response = line[len("Response: "):]
-                            print(f"[DEBUG] Got direct tools response: '{response}'")
-                            # We've got the complete response, exit the loop
-                            break
-                        elif in_response_block:
-                            # Add this line to our response
-                            response_lines.append(line)
+                        
+                        # If we're in a response block, add this line to our response
+                        if in_response_block:
                             print(f"[DEBUG] Added to response: '{line}'")
+                            response_lines.append(line)
                         else:
+                            # Skip debug messages from the MCP client
+                            print(f"[DEBUG] Skipping debug message: '{line}'")
                             # Add to general output for fallback
                             all_output.append(line)
                     else:
@@ -247,6 +285,10 @@ def send_message():
             if response_lines:
                 response = "\n".join(response_lines)
                 print(f"[DEBUG] Constructed multi-line response ({len(response_lines)} lines)")
+            elif in_response_block:
+                # We saw a RESPONSE_START but no content before process ended
+                response = "The operation was performed successfully."
+                print(f"[DEBUG] Got empty response after RESPONSE_START marker, using default success message")
             elif all_output:
                 # Fallback: use collected output if no marked response was found
                 filtered_output = [line for line in all_output 
@@ -269,8 +311,21 @@ def send_message():
                 
             # Remove tool call information
             import re
-            # Look for tool call patterns and remove them
+            # Filter out tool call lines - more comprehensive pattern to catch all tool calls
+            response_lines = response.split('\n')
+            filtered_lines = []
+            
+            for line in response_lines:
+                # Skip lines that contain tool call information
+                if not re.match(r'\[Gemini requested tool', line) and not re.match(r'\[Tool call:', line):
+                    filtered_lines.append(line)
+            
+            # Rebuild the response
+            response = '\n'.join(filtered_lines)
+            
+            # Also remove any leftover tool call patterns just to be safe
             response = re.sub(r'\[Gemini requested tool \'[^\']*\' with arguments: \{[^\}]*\}\]\n?', '', response)
+            response = re.sub(r'\[Tool call:[^\]]*\]\n?', '', response)
                 
             print(f"[DEBUG] Final processed response: '{response}'")
             

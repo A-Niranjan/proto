@@ -206,24 +206,26 @@ function App() {
     audio: []
   });
   
+  // Function to load media from server
+  const loadServerMedia = async () => {
+    try {
+      const serverMedia = await getAllMedia();
+      setUploadedMedia(serverMedia);
+      console.log('Loaded media from server:', serverMedia);
+      return serverMedia;
+    } catch (error) {
+      console.error('Error loading media from server:', error);
+      return { videos: [], photos: [], audio: [] };
+    }
+  };
+  
   // Load saved media from server on component mount
   useEffect(() => {
-    const loadServerMedia = async () => {
-      try {
-        const serverMedia = await getAllMedia();
-        setUploadedMedia(serverMedia);
-        console.log('Loaded media from server:', serverMedia);
-      } catch (error) {
-        console.error('Error loading media from server:', error);
-      }
-    };
-    
     loadServerMedia();
-    
     // Fetch media periodically to check for updates
     const intervalId = setInterval(loadServerMedia, 5000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, []); 
   
   // Clean up temp files on component unmount
   useEffect(() => {
@@ -417,22 +419,38 @@ function App() {
     setChatMessages([]);
   };
 
+  // Track the last response timestamp we've processed
+  const [lastResponseTimestamp, setLastResponseTimestamp] = useState(0);
+  
   const fetchChatResponse = async () => {
     try {
       const response = await axios.get('/api/chat/response');
       
       if (response.data.role === 'assistant') {
-        // Add the new message to chat
-        setChatMessages(prev => [...prev, response.data]);
-        // Stop polling once we have a response
-        setIsPolling(false);
+        // Check if this is a new response we haven't seen yet
+        const responseTimestamp = response.data.timestamp || 0;
         
-        // If the response contains a video name, refresh the videos list
-        // and check if we need to update the selected video
-        if (response.data.content.includes('processed') || 
-            response.data.content.includes('created') ||
-            response.data.content.includes('edited')) {
-          await fetchVideos();
+        if (responseTimestamp > lastResponseTimestamp) {
+          console.log(`New response received with timestamp: ${responseTimestamp}`);
+          
+          // Update our tracking of the last seen response
+          setLastResponseTimestamp(responseTimestamp);
+          
+          // Add the new message to chat
+          setChatMessages(prev => [...prev, response.data]);
+          
+          // Stop polling once we have a response
+          setIsPolling(false);
+          
+          // If the response contains a video name, refresh the videos list
+          // and check if we need to update the selected video
+          if (response.data.content.includes('processed') || 
+              response.data.content.includes('created') ||
+              response.data.content.includes('edited')) {
+            await fetchVideos();
+          }
+        } else {
+          console.log(`Ignoring duplicate response with timestamp: ${responseTimestamp}`);
         }
       }
     } catch (error) {
@@ -441,28 +459,108 @@ function App() {
   };
 
   const handleSendMessage = async (message) => {
-    // Add user message to chat
+    // Check if this is a video-related command and we have a selected video
+    const videoCommands = [
+      'analyze', 'get info', 'trim', 'extract', 'split', 'fade', 'add watermark',
+      'convert', 'merge', 'overlay', 'transform', 'process', 'get video info'
+    ];
+    
+    let processedMessage = message;
+    let includesVideoPath = false;
+    
+    // Check if the message already includes a file path
+    const hasFilePath = /[A-Za-z]:\\|[A-Za-z]:\//.test(message);
+    
+    // If we have a selected video and the message includes a video command
+    if (selectedVideo) {
+      const lowerMessage = message.toLowerCase();
+      const isVideoCommand = videoCommands.some(cmd => lowerMessage.includes(cmd));
+      
+      if (isVideoCommand) {
+        // Whether or not we already have a file path, we'll ensure we use the local file path
+        // from the server rather than the API URL path
+        includesVideoPath = true;
+        
+        // Instead of adding the path to the message, we'll pass it separately to the backend
+        // in the videoContext object, and let the backend handle converting the path
+        console.log(`Using currently loaded video for this command: ${selectedVideo.name}`);
+        
+        // Show notification that we're using the current video
+        showNotification('Using currently loaded video for this command', 'info');
+      }
+    }
+    
+    // Add message to chat (show original message to user)
     const userMessage = {
       role: 'user',
-      content: message,
-      timestamp: Date.now(),
+      content: message, // Show original message to user
+      timestamp: Date.now()
     };
     
     setChatMessages(prev => [...prev, userMessage]);
+    setIsPolling(true);
     
     try {
-      const response = await axios.post('/api/chat', { message });
+      // Send the processed message (with video path if applicable)
+      const response = await axios.post('/api/chat', { 
+        message: processedMessage,
+        videoContext: includesVideoPath ? selectedVideo : null
+      });
       
-      // Check if we already have the assistant's response
-      if (response.data.assistant) {
-        // Add the assistant message to chat
+      // If response is successful, start polling for assistant's response
+      if (response.data && response.data.assistant) {
         setChatMessages(prev => [...prev, response.data.assistant]);
-      } else {
-        // Start polling for the assistant's response
-        setIsPolling(true);
+        
+        // Check if the response includes an output video path
+        const assistantContent = response.data.assistant.content;
+        if (assistantContent) {
+          // Look for output file paths in the response
+          const outputPathMatch = assistantContent.match(/output(?:Path|File)\s*:\s*"?([^"\s,\n]+)"?/i) ||
+                                assistantContent.match(/saved(?:\s+to)?\s*:?\s*"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
+                                assistantContent.match(/successfully\s+(?:created|generated|processed)\s+"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i);
+          
+          if (outputPathMatch && outputPathMatch[1]) {
+            const outputPath = outputPathMatch[1];
+            console.log(`Detected output video path: ${outputPath}`);
+            
+            // Load the newly created video
+            try {
+              // Force a refresh of media files
+              await loadServerMedia();
+              
+              // Find the video in the updated list
+              const fileName = outputPath.split(/[\\/]/).pop(); // Get the filename
+              const video = uploadedMedia.videos.find(v => v.url.includes(fileName));
+              
+              if (video) {
+                // Add isDropped flag so it shows in the preview
+                video.isDropped = true;
+                onVideoSelect(video);
+                showNotification(`Loaded processed video: ${fileName}`, 'success');
+              } else {
+                // If we couldn't find it, try again after a delay
+                setTimeout(async () => {
+                  const refreshedMedia = await loadServerMedia();
+                  const video = refreshedMedia.videos.find(v => v.url.includes(fileName));
+                  if (video) {
+                    video.isDropped = true;
+                    onVideoSelect(video);
+                    showNotification(`Loaded processed video: ${fileName}`, 'success');
+                  }
+                }, 1000);
+              }
+            } catch (error) {
+              console.error('Error loading processed video:', error);
+            }
+          }
+        }
       }
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error sending chat message:', error);
+      // Show error notification
+      showNotification('Failed to send message. Please try again.', 'error');
+    } finally {
+      setIsPolling(false);
     }
   };
 
