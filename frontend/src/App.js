@@ -223,6 +223,103 @@ function App() {
   const loadVideoByFilename = async (filenamePattern, retryCount = 0) => {
     console.log(`Attempting to load video matching pattern: ${filenamePattern}`);
     
+    // First, refresh our media list to ensure we have the latest files
+    try {
+      console.log('Refreshing media list before searching for video');
+      await loadServerMedia();
+    } catch (err) {
+      console.error('Error refreshing media list:', err);
+    }
+    
+    // Special case for output.mp4 or audio-merged files
+    const isOutputMp4 = filenamePattern === 'output.mp4';
+    const isAudioMergedFile = filenamePattern.includes('_with_audio') || filenamePattern.includes('-with-audio') || filenamePattern.includes('_audio_enhanced');
+    const isProcessedOutput = filenamePattern.includes('-output') || filenamePattern.includes('_processed') || filenamePattern.includes('_trimmed') || filenamePattern.includes('_enhanced');
+    
+    try {
+      // For output.mp4, directly check temp folder via API
+      if (isOutputMp4) {
+        console.log('Looking specifically for output.mp4 in temp folder');
+        try {
+          // Try to fetch the video directly from temp folder
+          const response = await axios.get('/api/temp/output.mp4', { responseType: 'blob' });
+          if (response.status === 200) {
+            console.log('Found output.mp4 in temp folder, creating virtual video object');
+            // Create a virtual video object
+            const video = {
+              id: 'temp-output',
+              name: 'output.mp4',
+              path: '/api/temp/output.mp4',
+              type: 'videos',
+              isDropped: true, // This flag makes it show in preview
+              size: response.data.size || 0,
+              lastModified: Date.now()
+            };
+            
+            // Load it into preview
+            onVideoSelect(video);
+            showNotification('Loaded merged video', 'success');
+            return true;
+          }
+        } catch (error) {
+          console.log('Could not find output.mp4 in temp folder via direct access');
+        }
+      }
+      
+      // Special handling for audio-merged files and other processed files that might be in the uploads/videos folder
+      if (isAudioMergedFile || isProcessedOutput) {
+        console.log('Looking specifically for processed output file in videos folder');
+        try {
+          // Try loading server media first to get the latest list (already done above)
+          const mediaList = await getAllMedia();
+          
+          // First look for exact match on the filename
+          let processedVideo = mediaList.videos.find(v => v.name === filenamePattern);
+          
+          // Next, check for the most recent file with matching patterns (usually what we want)
+          if (!processedVideo) {
+            // Sort videos by timestamp (newest first)
+            const sortedVideos = [...mediaList.videos].sort((a, b) => b.lastModified - a.lastModified);
+            
+            // Look for the most recent file that matches any of our patterns
+            processedVideo = sortedVideos.find(v => 
+              (isAudioMergedFile && (v.name.includes('_with_audio') || v.name.includes('-with-audio') || v.name.includes('_audio_enhanced'))) ||
+              (isProcessedOutput && (v.name.includes('-output') || v.name.includes('_output'))) ||
+              v.name.includes('_processed') || 
+              v.name.includes('_trimmed') ||
+              v.name.includes('_enhanced') ||
+              // More specific pattern matching for timestamps
+              v.name.match(/^\d+\-output/) ||
+              v.name.match(/^\d+\-.*_with_audio/) ||
+              v.name.match(/^\d+\-.*_audio_enhanced/) ||
+              v.name.match(/^\d+\-.*_enhanced/)
+            );
+          }
+          
+          // If that fails, try the most recent video file as a fallback
+          if (!processedVideo && mediaList.videos.length > 0) {
+            console.log('No exact match found, checking most recent videos');
+            const sortedVideos = [...mediaList.videos].sort((a, b) => b.lastModified - a.lastModified);
+            processedVideo = sortedVideos[0]; // Most recent video
+          }
+          
+          if (processedVideo) {
+            console.log(`Found processed video: ${processedVideo.name}`);
+            processedVideo.isDropped = true; // Mark as droppable so it shows in preview
+            onVideoSelect(processedVideo);
+            showNotification(`Loaded processed video: ${processedVideo.name}`, 'success');
+            return true;
+          } else {
+            console.log('Could not find any matching processed videos');
+          }
+        } catch (error) {
+          console.error('Error searching for processed file:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking for special files:', error);
+    }
+    
     // Force a refresh of media first
     const mediaList = await loadServerMedia();
     
@@ -251,6 +348,17 @@ function App() {
       if (baseNameParts.length > 1) {
         const baseName = baseNameParts.slice(1).join('-');
         video = mediaList.videos.find(v => v.name.includes(baseName));
+      }
+    }
+    
+    // For output.mp4, try to find any recently processed videos
+    if (!video && isOutputMp4) {
+      // Look for any recently processed videos - sort by lastModified (newest first)
+      const sortedVideos = [...mediaList.videos].sort((a, b) => b.lastModified - a.lastModified);
+      if (sortedVideos.length > 0) {
+        // Try the most recent video
+        video = sortedVideos[0];
+        console.log(`No exact match found for output.mp4, using most recent video: ${video.name}`);
       }
     }
     
@@ -531,12 +639,63 @@ function App() {
             console.log(`Got response for current request: ${requestId}`);
           }
           
-          // If the response contains a video name, refresh the videos list
-          // and check if we need to update the selected video
+          // If the response contains text that suggests a video processing operation has completed,
+          // refresh the videos list and load the processed video into the preview
           if (response.data.content.includes('processed') || 
               response.data.content.includes('created') ||
-              response.data.content.includes('edited')) {
+              response.data.content.includes('edited') ||
+              response.data.content.includes('merged') ||
+              response.data.content.includes('trimmed') ||
+              response.data.content.includes('extracted') ||
+              response.data.content.includes('saved to') ||
+              response.data.content.includes('output.mp4') ||
+              response.data.content.includes('_with_audio') ||
+              response.data.content.includes('-with-audio')) {
+                
+            console.log('Processing result detected in response, refreshing videos');
             await fetchVideos();
+              
+            // Look for output file patterns in the response
+            const content = response.data.content;
+            // Enhanced pattern matching for finding output filenames
+            const outputPathMatch = content.match(/output(?:Path|File)\s*:\s*"?([^"\s,\n]+)"?/i) ||
+                               content.match(/saved(?:\s+(?:as|to))?\s*:?\s*"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
+                               content.match(/successfully\s+(?:created|generated|processed|trimmed|converted|saved|merged)\s+(?:as\s+|into\s+)?`?"?([^`"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))`?"?/i) ||
+                               content.match(/(?:trimmed|processed|exported|created|merged).*?(?:saved\s+as|as|into)\s+`?"?([^`"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))`?"?/i) ||
+                               content.match(/output is in\s+`([^`]+)`/i) ||
+                               content.match(/merged.*?output is in\s+`([^`]+)`/i) ||
+                               content.match(/have been successfully merged.*?`([^`]+)`/i) ||
+                               content.match(/merged into `([^`]+)`/i) ||
+                               content.match(/into `([^`]+)`/i) ||
+                               content.match(/output\.mp4/i) ? ['output.mp4', 'output.mp4'] : null ||
+                               content.match(/([^\s,\n]+_with_audio\.(?:mp4|mov|avi|webm|mkv))/i) ||
+                               content.match(/"([^"\s,\n]+_trimmed\.(?:mp4|mov|avi|webm|mkv))"/i);
+              
+            if (outputPathMatch && outputPathMatch[1]) {
+              const outputFile = outputPathMatch[1];
+              console.log(`Detected output file in response: ${outputFile}`);
+              // Attempt to load this video into the preview
+              setTimeout(() => loadVideoByFilename(outputFile), 500);
+            } else {
+              console.log('No specific output file detected, will attempt to load most recent video');
+              // If no specific file was mentioned, try to load the most recent processed video
+              setTimeout(async () => {
+                try {
+                  // Fetch latest media list
+                  const mediaList = await loadServerMedia();
+                  if (mediaList && mediaList.videos && mediaList.videos.length > 0) {
+                    // Sort by timestamp and load the most recent one
+                    const sortedVideos = [...mediaList.videos].sort((a, b) => b.lastModified - a.lastModified);
+                    const mostRecent = sortedVideos[0];
+                    console.log(`Loading most recent video: ${mostRecent.name}`);
+                    mostRecent.isDropped = true;
+                    onVideoSelect(mostRecent);
+                  }
+                } catch (err) {
+                  console.error('Error loading most recent video:', err);
+                }
+              }, 1000);
+            }
           }
         } else if (!requestId) {
           console.log('Response missing request ID, using timestamp as fallback');
@@ -558,6 +717,42 @@ function App() {
     }
   };
 
+  const findAudioFileByName = async (fileName) => {
+    try {
+      const response = await axios.get(`/api/audio/${fileName}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error finding audio file:', error);
+      return null;
+    }
+  };
+
+  // Function to find an audio file by name in the uploaded media
+  const findAudioFile = (audioFileName) => {
+    // Check if we have audio files in the uploaded media
+    if (!uploadedMedia || !uploadedMedia.audio || !uploadedMedia.audio.length) {
+      return null;
+    }
+    
+    // Normalize the filename for comparison
+    const normalizedFileName = audioFileName.toLowerCase().trim();
+    
+    // Search for audio files that match the name
+    const matchingAudio = uploadedMedia.audio.find(audio => {
+      // Check if the audio name matches (case insensitive)
+      const audioName = audio.name.toLowerCase();
+      
+      // Check for exact match or partial match
+      return audioName === normalizedFileName ||
+             audioName.includes(normalizedFileName) ||
+             // Handle case where user didn't include file extension
+             (audioName.split('.')[0] === normalizedFileName) ||
+             audioName.split('.')[0].includes(normalizedFileName);
+    });
+    
+    return matchingAudio;
+  };
+  
   const handleSendMessage = async (message) => {
     // Check if this is a video-related command and we have a selected video
     const videoCommands = [
@@ -569,8 +764,10 @@ function App() {
       'keep', 'remove', 'segment', 'cut', 'keep segment', 'remove segment', 'extract segment',
       'keeper', 'goalkeeper', 'keep only', 'remove except', 'save segment', 'section',
       'clip', 'part', 'portion', 'scene', 'include only', 'exclude', 'include', 'cut out',
-      'madmax', 'mad max'
-    ];
+      'madmax', 'mad max',
+      'add audio', 'add music', 'add sound', 'merge audio', 'add soundtrack', 'overlay audio',
+      'combine audio', 'combine with audio', 'attach audio', 'include audio'
+    ]; 
   
     // Exclusion list - commands that should NOT get a video path even if they match video commands
     const pathExclusionCommands = [
@@ -582,13 +779,46 @@ function App() {
     // Placeholder for the processed message that might include the video path
     let processedMessage = message;
     let includesVideoPath = false;
+    let audioFile = null;
     
     // Check if the message already includes a file path
     const hasFilePath = /[A-Za-z]:\\|[A-Za-z]:/.test(message);
     
-    // If we have a selected video and the message includes a video command
+    // Check if the message mentions an audio file
+    const lowerMessage = message.toLowerCase();
+    const audioCommands = ['add audio', 'add music', 'add sound', 'merge audio', 'add soundtrack', 'overlay audio'];
+    const isAudioCommand = audioCommands.some(cmd => lowerMessage.includes(cmd));
+    
+    // If this is an audio-related command, look for audio file references
+    if (isAudioCommand) {
+      // Extract potential audio file names using regex
+      // Look for patterns like "add music.mp3 to the video" or "add the file sound.mp3"
+      const audioFileMatches = lowerMessage.match(/add\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) || 
+                             lowerMessage.match(/music\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
+                             lowerMessage.match(/audio\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
+                             lowerMessage.match(/sound\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
+                             // Also look for just the file name with extension
+                             lowerMessage.match(/([\w-]+\.(mp3|wav|ogg|aac|m4a))/); 
+      
+      if (audioFileMatches && audioFileMatches[1]) {
+        const audioFileName = audioFileMatches[1];
+        console.log(`Detected audio file mention: ${audioFileName}`);
+        
+        // Look for this audio file in our uploaded media
+        audioFile = findAudioFile(audioFileName);
+        
+        if (audioFile) {
+          console.log(`Found matching audio file: ${audioFile.name}`);
+          // Show notification that we're using this audio file
+          showNotification(`Using audio file: ${audioFile.name}`, 'info');
+        }
+      }
+    }
+    
+    // If we have a video displayed in the preview and the message includes a video command
+    // Always use the current video in the preview, which might be different from the originally selected video
     if (selectedVideo) {
-      const lowerMessage = message.toLowerCase();
+      // We already defined lowerMessage above, so we'll reuse it here
       const isVideoCommand = videoCommands.some(cmd => lowerMessage.includes(cmd));
       
       // Check if this is a command that should be excluded from getting a video path
@@ -625,10 +855,13 @@ function App() {
       
       console.log(`Sending message with request ID: ${requestId}`);
       
-      // Send the processed message (with video path if applicable)
+      // Send the processed message (with video and audio context if applicable)
+      // Always use the currently displayed video, which may be different from the originally selected video
+      // This ensures that each command in a sequence operates on the most recent output
       const response = await axios.post('/api/chat', { 
         message: processedMessage,
-        videoContext: includesVideoPath ? selectedVideo : null
+        videoContext: includesVideoPath ? selectedVideo : null,  // selectedVideo will be the most recent one in the preview
+        audioContext: audioFile  // Include the audio file if found
       });
       
       // If we get an immediate response (rare but possible)
@@ -647,49 +880,90 @@ function App() {
         // Check if the response includes an output video path
         const assistantContent = response.data.assistant.content;
         if (assistantContent) {
-          // Look for output file paths in the response - enhance pattern matching for more cases
-          const outputPathMatch = assistantContent.match(/output(?:Path|File)\s*:\s*"?([^"\s,\n]+)"?/i) ||
-                                assistantContent.match(/saved(?:\s+(?:as|to))?\s*:?\s*"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
-                                assistantContent.match(/successfully\s+(?:created|generated|processed|trimmed|converted|saved)\s+(?:as\s+)?"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
-                                assistantContent.match(/(?:trimmed|processed|exported|created).*?(?:saved\s+as|as)\s+"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
-                                assistantContent.match(/"([^"\s,\n]+_trimmed\.(?:mp4|mov|avi|webm|mkv))"/i);
-          
-          if (outputPathMatch && outputPathMatch[1]) {
-            const outputPath = outputPathMatch[1];
-            console.log(`Detected output video path: ${outputPath}`);
+          try {
+            // Look for output file paths in the response - enhance pattern matching for more cases
+            const outputPathMatch = assistantContent.match(/output(?:Path|File)\s*:\s*"?([^"\s,\n]+)"?/i) ||
+                                  assistantContent.match(/saved(?:\s+(?:as|to))?\s*:?\s*"?([^"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))"?/i) ||
+                                  assistantContent.match(/successfully\s+(?:created|generated|processed|trimmed|converted|saved|merged)\s+(?:as\s+|into\s+)?`?"?([^`"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))`?"?/i) ||
+                                  assistantContent.match(/(?:trimmed|processed|exported|created|merged).*?(?:saved\s+as|as|into)\s+`?"?([^`"\s,\n]+\.(?:mp4|mov|avi|webm|mkv))`?"?/i) ||
+                                  assistantContent.match(/output is in\s+`([^`]+)`/i) ||
+                                  assistantContent.match(/merged.*?output is in\s+`([^`]+)`/i) ||
+                                  assistantContent.match(/have been successfully merged.*?`([^`]+)`/i) ||
+                                  assistantContent.match(/merged into `([^`]+)`/i) ||
+                                  assistantContent.match(/into `([^`]+)`/i) ||
+                                  assistantContent.match(/output\.mp4/i) ? ['output.mp4', 'output.mp4'] : null ||
+                                  assistantContent.match(/([^\s,\n]+_with_audio\.(?:mp4|mov|avi|webm|mkv))/i) ||
+                                  assistantContent.match(/"([^"\s,\n]+_trimmed\.(?:mp4|mov|avi|webm|mkv))"/i);
             
-            // Get just the filename regardless of path format
-            let fileName = outputPath;
-            // If it has path separators, extract just the filename
-            if (outputPath.includes('\\') || outputPath.includes('/')) {
-              fileName = outputPath.split(/[\\/]/).pop(); // Get the filename
-            }
-            console.log(`Looking for processed video with filename: ${fileName}`);
-            
-            try {
-              // Use our dedicated video loading function with better retry logic
-              loadVideoByFilename(fileName);
+            if (outputPathMatch && outputPathMatch[1]) {
+              const outputPath = outputPathMatch[1];
+              console.log(`Detected output video path: ${outputPath}`);
               
-              // Also check for patterns like _trimmed suffix if the filename contains them
-              if (fileName.includes('_trimmed')) {
-                const baseName = fileName.split('_trimmed')[0];
-                console.log(`Also looking for video with base name: ${baseName} plus _trimmed suffix`);
-                setTimeout(() => {
-                  loadVideoByFilename(baseName + '_trimmed');
-                }, 500);
+              // Get just the filename regardless of path format
+              let fileName = outputPath;
+              // If it has path separators, extract just the filename
+              if (outputPath.includes('\\') || outputPath.includes('/')) {
+                fileName = outputPath.split(/[\\/]/).pop(); // Get the filename
               }
+              console.log(`Looking for processed video with filename: ${fileName}`);
               
-              // Special case for timestamp-prefixed filenames
-              if (fileName.match(/^\d+\-/)) {
-                const baseNameWithoutTimestamp = fileName.split('-').slice(1).join('-');
-                console.log(`Also looking for video with name: ${baseNameWithoutTimestamp}`);
-                setTimeout(() => {
-                  loadVideoByFilename(baseNameWithoutTimestamp);
-                }, 1000);
+              // Check if this is an API path like /api/videos/123456-output.mp4
+              if (outputPath.startsWith('/api/videos/')) {
+                console.log(`Detected API path, loading directly: ${outputPath}`);
+                
+                // Request the video information from the server
+                setTimeout(async () => {
+                  try {
+                    // Refresh media list first
+                    await loadServerMedia();
+                    
+                    // Then look for the video with this path
+                    const mediaList = await getAllMedia();
+                    const video = mediaList.videos.find(v => v.path === outputPath);
+                    
+                    if (video) {
+                      console.log(`Found video with path: ${outputPath}`);
+                      video.isDropped = true;
+                      onVideoSelect(video);
+                      showNotification(`Loaded video: ${video.name}`, 'success');
+                    } else {
+                      console.log(`Could not find video with path: ${outputPath}, falling back to filename`);
+                      loadVideoByFilename(fileName);
+                    }
+                  } catch (error) {
+                    console.error(`Error loading video by API path: ${error}`);
+                    loadVideoByFilename(fileName);
+                  }
+                }, 1000); // Wait a second for the server to finish processing
+              } else {
+                try {
+                  // Use our dedicated video loading function with better retry logic
+                  loadVideoByFilename(fileName);
+                  
+                  // Also check for patterns like _trimmed suffix if the filename contains them
+                  if (fileName.includes('_trimmed')) {
+                    const baseName = fileName.split('_trimmed')[0];
+                    console.log(`Also looking for video with base name: ${baseName} plus _trimmed suffix`);
+                    setTimeout(() => {
+                      loadVideoByFilename(baseName + '_trimmed');
+                    }, 500);
+                  }
+                  
+                  // Special case for timestamp-prefixed filenames
+                  if (fileName.match(/^\d+\-/)) {
+                    const baseNameWithoutTimestamp = fileName.split('-').slice(1).join('-');
+                    console.log(`Also looking for video with name: ${baseNameWithoutTimestamp}`);
+                    setTimeout(() => {
+                      loadVideoByFilename(baseNameWithoutTimestamp);
+                    }, 1000);
+                  }
+                } catch (error) {
+                  console.error(`Error loading video by filename: ${error}`);
+                }
               }
-            } catch (error) {
-              console.error('Error loading processed video:', error);
             }
+          } catch (error) {
+            console.error('Error processing video path from response:', error);
           }
         }
       }

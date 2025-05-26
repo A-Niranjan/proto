@@ -233,16 +233,26 @@ def get_all_media():
         for filename in os.listdir(directory):
             if os.path.isfile(os.path.join(directory, filename)):
                 try:
-                    # Get timestamp from filename
-                    timestamp = int(filename.split('-')[0])
-                    original_name = filename[len(str(timestamp))+1:]
-                    
                     file_path = os.path.join(directory, filename)
                     stats = os.stat(file_path)
                     
+                    # Check if the filename has a timestamp prefix
+                    parts = filename.split('-', 1)
+                    
+                    if len(parts) > 1 and parts[0].isdigit():
+                        # Has timestamp in filename
+                        timestamp = int(parts[0])
+                        original_name = parts[1]
+                        file_id = str(timestamp)
+                    else:
+                        # No timestamp - use the file's modification time and the full filename
+                        timestamp = int(stats.st_mtime * 1000)
+                        original_name = filename
+                        file_id = f"file-{timestamp}"
+                    
                     # Create base media item
                     media_item = {
-                        'id': str(timestamp),
+                        'id': file_id,
                         'name': original_name,
                         'path': f"/api/{media_type}/{filename}",
                         'type': media_type,

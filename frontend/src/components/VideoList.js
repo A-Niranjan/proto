@@ -301,10 +301,22 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
           item.name?.includes('_processed') ||
           item.name?.includes('_filtered') ||
           item.name?.includes('_converted') ||
+          // Check for any merged audio files
+          item.name?.includes('_with_audio') ||
+          item.name?.includes('-with-audio') ||
+          // Check for any output files
+          item.name?.includes('-output') ||
+          item.name?.includes('output_') ||
+          item.name === 'output.mp4' ||
           // Check filename for timestamps at the beginning followed by original filename
           (item.name?.match(/^\d+\-.*_\w+\.\w+$/) !== null) ||
-          // Check for specific output patterns from ffmpeg
+          // Check for timestamped files (which are likely processed outputs)
+          (item.name?.match(/^\d+\-output\./) !== null) ||
+          // Check for any output file patterns
           item.path?.includes('output.mp4') ||
+          item.path?.includes('/output_') ||
+          // Check if file is in a special processed output directory
+          (item.path?.includes('/processed/') || item.path?.includes('/temp/')) ||          
           // Add other patterns as needed
           false;
         

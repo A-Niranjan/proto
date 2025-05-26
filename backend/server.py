@@ -6,11 +6,67 @@ import asyncio
 import time
 import subprocess
 import msvcrt
+import os
+import shutil
+import re
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import uvicorn
 from a2wsgi import WSGIMiddleware
 from media_utils import save_media_file, delete_temp_file, clean_temp_files, get_all_media, VIDEOS_FOLDER, PHOTOS_FOLDER, AUDIO_FOLDER, TEMP_FOLDER, THUMBNAILS_FOLDER, get_file_path_from_url
+
+# Function to handle output files and move them to the proper location
+def handle_output_file(output_path):
+    """
+    Handle an output file by moving it to the proper videos folder and
+    generating a unique filename with timestamp
+    
+    Args:
+        output_path (str): Path to the output file
+    
+    Returns:
+        str: New path to the moved file
+    """
+    # Check if the file exists
+    if not os.path.exists(output_path):
+        print(f"[DEBUG] Output file not found: {output_path}")
+        return None
+        
+    # Get the filename
+    filename = os.path.basename(output_path)
+    
+    # Determine if this is an audio-merged file
+    is_audio_merged = 'with_audio' in filename
+    
+    # Create a new filename with timestamp
+    timestamp = int(time.time() * 1000)
+    name, ext = os.path.splitext(filename)
+    
+    # For files that already have _with_audio, we need to make sure we don't duplicate it
+    if 'with_audio' in name:
+        # If we're adding audio to an already audio-merged file, use a different suffix
+        base_name = name.replace('_with_audio', '').replace('-with-audio', '')
+        new_filename = f"{timestamp}-{base_name}_audio_enhanced{ext}"
+    elif name == 'output':
+        # For standard output files, add an indicator
+        new_filename = f"{timestamp}-{name}_with_audio{ext}"
+    else:
+        # For other files, add the standard suffix
+        new_filename = f"{timestamp}-{name}{ext}"
+    
+    # Create the new path in the videos folder
+    new_path = os.path.join(VIDEOS_FOLDER, new_filename)
+    
+    try:
+        # Move the file to the videos folder
+        shutil.move(output_path, new_path)
+        print(f"[DEBUG] Moved output file from {output_path} to {new_path}")
+        
+        # Return the API path for this file
+        return f"/api/videos/{new_filename}"
+    except Exception as e:
+        print(f"[DEBUG] Error moving output file: {e}")
+        return None
 
 # Create Flask app
 app = Flask(__name__, static_folder='../frontend/build')
@@ -176,6 +232,7 @@ def send_message():
     data = request.json
     message = data.get('message', '')
     video_context = data.get('videoContext', None)
+    audio_context = data.get('audioContext', None)
     print(f"\n[DEBUG] Received message: '{message}'")
     
     # If we have video context, make sure to convert API paths to file system paths
@@ -187,22 +244,85 @@ def send_message():
             original_path = video_context['path']
             file_system_path = convert_api_url_to_path(original_path)
             
-            # Update the message to use the file system path instead of the URL
-            if original_path in message:
-                message = message.replace(original_path, file_system_path)
-                print(f"[DEBUG] Updated message with file system path: '{message}'")
-            # If the path isn't in the message, we may need to append it
-            elif not any(path in message for path in ['/api/', 'E:', 'C:', '/']):
-                # Replace any trailing dots or spaces
-                message = message.rstrip('. ')
+            if file_system_path and file_system_path != original_path:
+                # Append the file path to the message
+                print(f"[DEBUG] Appended file system path to message: '{message} {file_system_path}'")
                 message = f"{message} {file_system_path}"
-                print(f"[DEBUG] Appended file system path to message: '{message}'")
+            
+    # If we have audio context, make sure to convert API paths to file system paths
+    if audio_context:
+        print(f"[DEBUG] With audio context: {audio_context}")
+        
+        # Convert the URL path to a file system path
+        if 'path' in audio_context and audio_context['path']:
+            original_audio_path = audio_context['path']
+            audio_file_system_path = convert_api_url_to_path(original_audio_path)
+            
+            if audio_file_system_path and audio_file_system_path != original_audio_path:
+                # Append the audio file path to the message
+                print(f"[DEBUG] Appended audio file system path to message: '{message} {audio_file_system_path}'")
+                message = f"{message} {audio_file_system_path}"
+            # No need for an elif clause here since we already append the path above
     
     if not message:
         return jsonify({'error': 'Empty message'}), 400
     
     # Generate a unique request ID for this message
     request_id = str(int(time.time() * 1000)) + '-' + str(hash(message) % 10000)
+    
+    # Pre-process message to handle special cases like audio merging
+    # Check if this is a merge_audio_video command that might use the same input and output
+    if 'add audio' in message.lower() or 'merge audio' in message.lower() or 'merge_audio_video' in message.lower():
+        print(f"[DEBUG] Pre-processing potential audio merge command: {message}")
+        
+        # Extract any file paths in the message
+        import re
+        file_paths = re.findall(r'[A-Za-z]:\\[^\s]+\.(?:mp4|mov|avi|mkv|webm)', message)
+        
+        if len(file_paths) >= 2:
+            # Check if the input and output paths are the same or if output path has _with_audio
+            video_path = None
+            audio_path = None
+            output_path = None
+            
+            for path in file_paths:
+                if path.lower().endswith('.mp3') or path.lower().endswith('.wav') or path.lower().endswith('.aac'):
+                    audio_path = path
+                elif '_with_audio' in path.lower() or 'output_with_audio' in path.lower() or 'output.mp4' in path.lower():
+                    # This is likely both the input video and attempted output path
+                    video_path = path
+                    
+            # If we found a video with _with_audio, it's likely being used as both input and output
+            if video_path and '_with_audio' in video_path.lower():
+                # Generate a new output path with _audio_enhanced suffix
+                dir_name = os.path.dirname(video_path)
+                base_name = os.path.basename(video_path)
+                name, ext = os.path.splitext(base_name)
+                
+                # Create a clean base name without _with_audio or timestamps
+                clean_name = name
+                if '_with_audio' in clean_name:
+                    clean_name = clean_name.replace('_with_audio', '')
+                elif '-with-audio' in clean_name:
+                    clean_name = clean_name.replace('-with-audio', '')
+                    
+                # Remove any timestamp prefix if present
+                if re.match(r'^\d+\-', clean_name):
+                    clean_name = re.sub(r'^\d+\-', '', clean_name)
+                    
+                # Generate new timestamped filename with _audio_enhanced suffix
+                timestamp = int(time.time() * 1000)
+                new_output_filename = f"{timestamp}-{clean_name}_audio_enhanced{ext}"
+                new_output_path = os.path.join(dir_name, new_output_filename)
+                
+                print(f"[DEBUG] Preventing in-place editing by using new output path: {new_output_path}")
+                
+                # Replace the output path in the message
+                if audio_path:
+                    # Format: add audio.mp3 to video VIDEO_PATH AUDIO_PATH
+                    # Rewrite to use the new output path
+                    message = f"add audio.mp3 to video {video_path} {audio_path} {new_output_path}"
+                    print(f"[DEBUG] Rewritten message: {message}")
     
     # Add user message to chat history with request ID
     user_message = {
@@ -361,8 +481,22 @@ def send_message():
             
         # Add the response to chat history if we got one
         if response:
-            print(f"[DEBUG] Got response: '{response}'")
-            # Include the same request_id from the user message
+            # Check for output.mp4 in the backend directory
+            output_mp4_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output.mp4')
+            if os.path.exists(output_mp4_path):
+                print(f"[DEBUG] Found output.mp4 in backend directory, moving to videos folder")
+                new_path = handle_output_file(output_mp4_path)
+                
+                if new_path:
+                    # Update the response with the new path if it contains output.mp4
+                    if 'output.mp4' in response:
+                        response = response.replace('output.mp4', os.path.basename(new_path))
+                        print(f"[DEBUG] Updated response with new path: {response}")
+                        
+                        # Also update the response with the full API path
+                        response = f"{response}\n\nYou can access the processed video at: {new_path}"
+            
+            # Create the assistant message
             assistant_message = {
                 'role': 'assistant',
                 'content': response,
