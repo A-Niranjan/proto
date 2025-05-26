@@ -565,7 +565,11 @@ function App() {
       'convert', 'merge', 'overlay', 'transform', 'process', 'get video info',
       'filter', 'apply filter', 'batman filter', 'apply batman filter', 'blur', 'sharpen', 'rotate',
       'flip', 'mirror', 'crop', 'resize', 'adjust', 'speed', 'slow', 'fast', 'reverse',
-      'effect', 'color', 'brightness', 'contrast', 'saturation', 'hue'
+      'effect', 'color', 'brightness', 'contrast', 'saturation', 'hue',
+      'keep', 'remove', 'segment', 'cut', 'keep segment', 'remove segment', 'extract segment',
+      'keeper', 'goalkeeper', 'keep only', 'remove except', 'save segment', 'section',
+      'clip', 'part', 'portion', 'scene', 'include only', 'exclude', 'include', 'cut out',
+      'madmax', 'mad max'
     ];
   
     // Exclusion list - commands that should NOT get a video path even if they match video commands

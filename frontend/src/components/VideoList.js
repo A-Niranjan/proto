@@ -289,10 +289,28 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
     
     // Apply filtering based on file type
     if (activeTab === 'videos') {
-      result = result.filter(item => 
-        item.type === 'videos' || 
-        (item.path && (item.path.endsWith('.mp4') || item.path.endsWith('.webm') || item.path.endsWith('.mov')))
-      );
+      result = result.filter(item => {
+        // First check for the right file type
+        const isVideoType = item.type === 'videos' || 
+          (item.path && (item.path.endsWith('.mp4') || item.path.endsWith('.webm') || item.path.endsWith('.mov')));
+        
+        // Then exclude processed videos (those with special suffixes)
+        const isProcessedVideo = 
+          // Check for common processed video patterns
+          item.name?.includes('_trimmed') || 
+          item.name?.includes('_processed') ||
+          item.name?.includes('_filtered') ||
+          item.name?.includes('_converted') ||
+          // Check filename for timestamps at the beginning followed by original filename
+          (item.name?.match(/^\d+\-.*_\w+\.\w+$/) !== null) ||
+          // Check for specific output patterns from ffmpeg
+          item.path?.includes('output.mp4') ||
+          // Add other patterns as needed
+          false;
+        
+        // Return true only if it's a video type AND NOT a processed video
+        return isVideoType && !isProcessedVideo;
+      });
     } else if (activeTab === 'photos') {
       result = result.filter(item => 
         item.type === 'photos' || 
