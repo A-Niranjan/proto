@@ -301,13 +301,23 @@ const VideoList = ({ videos = [], selectedVideo, onSelectVideo, onTabChange, act
           item.name?.includes('_processed') ||
           item.name?.includes('_filtered') ||
           item.name?.includes('_converted') ||
+          item.name?.includes('_enhanced') ||
+          item.name?.includes('_batman') ||
+          item.name?.includes('_madmax') ||
+          item.name?.includes('_segment') ||
+          item.name?.includes('_cropped') ||
+          item.name?.includes('_rotated') ||
+          item.name?.includes('_flipped') ||
           // Check for any merged audio files
           item.name?.includes('_with_audio') ||
           item.name?.includes('-with-audio') ||
+          item.name?.includes('_audio_enhanced') ||
           // Check for any output files
           item.name?.includes('-output') ||
-          item.name?.includes('output_') ||
+          item.name?.includes('_output') ||
           item.name === 'output.mp4' ||
+          // Timestamp patterns - these are always processed videos
+          (item.name?.match(/^\d{10,}\-/) !== null) ||
           // Check filename for timestamps at the beginning followed by original filename
           (item.name?.match(/^\d+\-.*_\w+\.\w+$/) !== null) ||
           // Check for timestamped files (which are likely processed outputs)

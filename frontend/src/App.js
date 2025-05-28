@@ -220,7 +220,8 @@ function App() {
   };
   
   // Load a specific video into the preview by its filename or pattern
-  const loadVideoByFilename = async (filenamePattern, retryCount = 0) => {
+  // showNotification parameter controls whether to show notifications (default: false)
+  const loadVideoByFilename = async (filenamePattern, showNotification = false, retryCount = 0) => {
     console.log(`Attempting to load video matching pattern: ${filenamePattern}`);
     
     // First, refresh our media list to ensure we have the latest files
@@ -234,7 +235,8 @@ function App() {
     // Special case for output.mp4 or audio-merged files
     const isOutputMp4 = filenamePattern === 'output.mp4';
     const isAudioMergedFile = filenamePattern.includes('_with_audio') || filenamePattern.includes('-with-audio') || filenamePattern.includes('_audio_enhanced');
-    const isProcessedOutput = filenamePattern.includes('-output') || filenamePattern.includes('_processed') || filenamePattern.includes('_trimmed') || filenamePattern.includes('_enhanced');
+    const isProcessedOutput = filenamePattern.includes('-output') || filenamePattern.includes('_output') || filenamePattern.includes('_processed') || filenamePattern.includes('_trimmed') || filenamePattern.includes('_enhanced') || filenamePattern.includes('_filtered') || filenamePattern.includes('_batman') || filenamePattern.includes('_madmax') || filenamePattern.includes('_instagram');
+    const isTimestampedOutput = /^\d{10,}\-.*\.(mp4|mov|avi|webm|mkv)$/.test(filenamePattern);
     
     try {
       // For output.mp4, directly check temp folder via API
@@ -288,11 +290,17 @@ function App() {
               v.name.includes('_processed') || 
               v.name.includes('_trimmed') ||
               v.name.includes('_enhanced') ||
+              v.name.includes('_filtered') ||
+              v.name.includes('_batman') ||
+              v.name.includes('_madmax') ||
               // More specific pattern matching for timestamps
               v.name.match(/^\d+\-output/) ||
               v.name.match(/^\d+\-.*_with_audio/) ||
               v.name.match(/^\d+\-.*_audio_enhanced/) ||
-              v.name.match(/^\d+\-.*_enhanced/)
+              v.name.match(/^\d+\-.*_enhanced/) ||
+              v.name.match(/^\d+\-.*_filtered/) ||
+              // Most general case: any file with a timestamp prefix
+              v.name.match(/^\d{10,}\-[^\s]*\.(mp4|mov|avi|webm|mkv)$/)
             );
           }
           
@@ -306,9 +314,21 @@ function App() {
           if (processedVideo) {
             console.log(`Found processed video: ${processedVideo.name}`);
             processedVideo.isDropped = true; // Mark as droppable so it shows in preview
-            onVideoSelect(processedVideo);
-            showNotification(`Loaded processed video: ${processedVideo.name}`, 'success');
+            onVideoSelect(processedVideo, false); // Don't show notifications
             return true;
+          } else if (isTimestampedOutput || filenamePattern.match(/^\d{10,}\-[^\s]*\.(mp4|mov|avi|webm|mkv)$/)) {
+            // Special case for timestamped output files
+            console.log('Looking for any timestamped output file');
+            // Get the most recent video with a timestamp prefix
+            const sortedVideos = [...mediaList.videos].sort((a, b) => b.lastModified - a.lastModified);
+            const mostRecentTimestamped = sortedVideos.find(v => v.name.match(/^\d{10,}\-[^\s]*\.(mp4|mov|avi|webm|mkv)$/));
+            
+            if (mostRecentTimestamped) {
+              console.log(`Found timestamped output video: ${mostRecentTimestamped.name}`);
+              mostRecentTimestamped.isDropped = true;
+              onVideoSelect(mostRecentTimestamped, false); // Don't show notifications
+              return true;
+            }
           } else {
             console.log('Could not find any matching processed videos');
           }
@@ -650,7 +670,9 @@ function App() {
               response.data.content.includes('saved to') ||
               response.data.content.includes('output.mp4') ||
               response.data.content.includes('_with_audio') ||
-              response.data.content.includes('-with-audio')) {
+              response.data.content.includes('-with-audio') ||
+              response.data.content.includes('operation was performed successfully') ||
+              response.data.content.includes('successfully')) {
                 
             console.log('Processing result detected in response, refreshing videos');
             await fetchVideos();
@@ -669,13 +691,16 @@ function App() {
                                content.match(/into `([^`]+)`/i) ||
                                content.match(/output\.mp4/i) ? ['output.mp4', 'output.mp4'] : null ||
                                content.match(/([^\s,\n]+_with_audio\.(?:mp4|mov|avi|webm|mkv))/i) ||
+                               content.match(/([^\s,\n]+output_with_audio\.(?:mp4|mov|avi|webm|mkv))/i) ||
+                               content.match(/([^\s,\n]+\d{10,}_output[^\s]*\.(?:mp4|mov|avi|webm|mkv))/i) ||
+                               content.match(/([^\s,\n]+_(?:audio_enhanced|filtered|processed|batman|madmax|rotated|flipped|cropped|resized|segmented)\.(?:mp4|mov|avi|webm|mkv))/i) ||
                                content.match(/"([^"\s,\n]+_trimmed\.(?:mp4|mov|avi|webm|mkv))"/i);
               
             if (outputPathMatch && outputPathMatch[1]) {
               const outputFile = outputPathMatch[1];
               console.log(`Detected output file in response: ${outputFile}`);
-              // Attempt to load this video into the preview
-              setTimeout(() => loadVideoByFilename(outputFile), 500);
+              // Attempt to load this video into the preview without notifications
+              setTimeout(() => loadVideoByFilename(outputFile, false), 500);
             } else {
               console.log('No specific output file detected, will attempt to load most recent video');
               // If no specific file was mentioned, try to load the most recent processed video
@@ -686,10 +711,27 @@ function App() {
                   if (mediaList && mediaList.videos && mediaList.videos.length > 0) {
                     // Sort by timestamp and load the most recent one
                     const sortedVideos = [...mediaList.videos].sort((a, b) => b.lastModified - a.lastModified);
-                    const mostRecent = sortedVideos[0];
-                    console.log(`Loading most recent video: ${mostRecent.name}`);
-                    mostRecent.isDropped = true;
-                    onVideoSelect(mostRecent);
+                    
+                    // First try to find the most recent processed video
+                    const recentProcessed = sortedVideos.find(v => 
+                      v.name.includes('output') || 
+                      v.name.includes('_processed') || 
+                      v.name.includes('_trimmed') || 
+                      v.name.includes('_with_audio') || 
+                      v.name.includes('-with-audio') ||
+                      v.name.includes('_enhanced') ||
+                      v.name.includes('_filtered') ||
+                      v.name.includes('_batman') ||
+                      v.name.includes('_madmax') ||
+                      v.name.match(/^\d{10,}\-[^\s]*\.(mp4|mov|avi|webm|mkv)$/)
+                    );
+                    
+                    // Use processed video if found, otherwise use most recent
+                    const videoToLoad = recentProcessed || sortedVideos[0];
+                    console.log(`Loading ${recentProcessed ? 'most recent processed' : 'most recent'} video: ${videoToLoad.name}`);
+                    videoToLoad.isDropped = true;
+                    // Load video silently without notifications
+                    onVideoSelect(videoToLoad, false);
                   }
                 } catch (err) {
                   console.error('Error loading most recent video:', err);
@@ -809,8 +851,8 @@ function App() {
         
         if (audioFile) {
           console.log(`Found matching audio file: ${audioFile.name}`);
-          // Show notification that we're using this audio file
-          showNotification(`Using audio file: ${audioFile.name}`, 'info');
+          // Don't show notification that we're using this audio file
+          // Notification removed as per user request
         }
       }
     }
@@ -833,8 +875,8 @@ function App() {
         // in the videoContext object, and let the backend handle converting the path
         console.log(`Using currently loaded video for this command: ${selectedVideo.name}`);
         
-        // Show notification that we're using the current video
-        showNotification('Using currently loaded video for this command', 'info');
+        // Don't show notification when using the current video
+        // This line was removed as per user request
       }
     }
     
@@ -879,6 +921,78 @@ function App() {
       
         // Check if the response includes an output video path
         const assistantContent = response.data.assistant.content;
+        
+        // Check if this was an audio merge or format conversion operation based on the user's original message
+        const userQuery = response.data.user && response.data.user.content ? response.data.user.content.toLowerCase() : '';
+        const isAudioMergeOperation = userQuery.includes('add audio') || 
+                                    userQuery.includes('merge audio') || 
+                                    userQuery.includes('add music') || 
+                                    userQuery.includes('add sound');
+        
+        // Check if this was a format conversion like Instagram format
+        const isFormatConversion = userQuery.includes('instagram') ||  
+                                 userQuery.includes('aspect ratio') || 
+                                 userQuery.includes('convert format') || 
+                                 userQuery.includes('square format');
+        
+        // Specifically detect requested format type
+        const isInstagramStoryFormat = userQuery.includes('instagram story') || 
+                                      userQuery.includes('9:16') || 
+                                      userQuery.includes('vertical') || 
+                                      userQuery.includes('portrait') || 
+                                      userQuery.includes('instagram reel');
+        
+        const isInstagramSquareFormat = userQuery.includes('instagram square') || 
+                                       userQuery.includes('1:1') || 
+                                       userQuery.includes('square');
+        
+        // Function to find and load the most recent processed video
+        const findAndLoadRecentVideo = async (searchPatterns) => {
+          try {
+            await loadServerMedia();
+            const mediaList = await getAllMedia();
+            
+            if (mediaList && mediaList.videos) {
+              // Sort by most recent first
+              const sortedVideos = [...mediaList.videos].sort((a, b) => b.lastModified - a.lastModified);
+              
+              // Look for videos with any of the search patterns
+              const recentVideo = sortedVideos.find(v => {
+                // Check if the video name matches any of the patterns
+                return searchPatterns.some(pattern => v.name.includes(pattern)) || 
+                      (v.lastModified && Date.now() - v.lastModified < 10000); // Created in the last 10 seconds
+              });
+              
+              if (recentVideo) {
+                console.log(`Found recent processed video: ${recentVideo.name}`);
+                recentVideo.isDropped = true;
+                onVideoSelect(recentVideo);
+                return true;
+              }
+            }
+            return false;
+          } catch (err) {
+            console.error('Error looking for processed output:', err);
+            return false;
+          }
+        };
+
+        // If this was an audio merge operation, refresh media list and look for output files
+        if (isAudioMergeOperation) {
+          console.log('Detected audio merge operation, refreshing media list to find new output file');
+          setTimeout(() => {
+            findAndLoadRecentVideo(['_with_audio', '-with-audio', '_audio']);
+          }, 1000);
+        }
+        
+        // If this was a format conversion operation, refresh media list and look for output files
+        if (isFormatConversion) {
+          console.log('Detected format conversion operation, refreshing media list to find new output file');
+          setTimeout(() => {
+            findAndLoadRecentVideo(['_instagram', '_1x1', 'instagram', 'square']);
+          }, 1000);
+        }
+        
         if (assistantContent) {
           try {
             // Look for output file paths in the response - enhance pattern matching for more cases
@@ -891,9 +1005,16 @@ function App() {
                                   assistantContent.match(/have been successfully merged.*?`([^`]+)`/i) ||
                                   assistantContent.match(/merged into `([^`]+)`/i) ||
                                   assistantContent.match(/into `([^`]+)`/i) ||
-                                  assistantContent.match(/output\.mp4/i) ? ['output.mp4', 'output.mp4'] : null ||
+                                  assistantContent.match(/output is saved at\s+`([^`]+)`/i) ||
+                                  assistantContent.match(/saved at\s+`([^`]+)`/i) ||
+                                  assistantContent.match(/The output is in\s+`([^`]+)`/i) ||
+                                  assistantContent.match(/converted.*?saved at\s+`([^`]+)`/i) ||
+                                  assistantContent.match(/instagram.*?saved at\s+`([^`]+)`/i) ||
+                                  assistantContent.match(/merged with the video.*?output is in\s+`([^`]+)`/i) ||
+                                  (assistantContent.match(/output\.mp4/i) ? ['output.mp4', 'output.mp4'] : null) ||
                                   assistantContent.match(/([^\s,\n]+_with_audio\.(?:mp4|mov|avi|webm|mkv))/i) ||
-                                  assistantContent.match(/"([^"\s,\n]+_trimmed\.(?:mp4|mov|avi|webm|mkv))"/i);
+                                  assistantContent.match(/"([^"\s,\n]+_trimmed\.(?:mp4|mov|avi|webm|mkv))"/i) ||
+                                  assistantContent.match(/([^\s,\n]+_instagram\.(?:mp4|mov|avi|webm|mkv))/i);
             
             if (outputPathMatch && outputPathMatch[1]) {
               const outputPath = outputPathMatch[1];
@@ -925,7 +1046,6 @@ function App() {
                       console.log(`Found video with path: ${outputPath}`);
                       video.isDropped = true;
                       onVideoSelect(video);
-                      showNotification(`Loaded video: ${video.name}`, 'success');
                     } else {
                       console.log(`Could not find video with path: ${outputPath}, falling back to filename`);
                       loadVideoByFilename(fileName);
@@ -956,6 +1076,15 @@ function App() {
                     setTimeout(() => {
                       loadVideoByFilename(baseNameWithoutTimestamp);
                     }, 1000);
+                  }
+                  
+                  // Also check for Instagram formats
+                  if (fileName.includes('_instagram')) {
+                    const baseName = fileName.split('_instagram')[0];
+                    console.log(`Also looking for Instagram-formatted video with base name: ${baseName}`);
+                    setTimeout(() => {
+                      loadVideoByFilename(baseName + '_instagram');
+                    }, 800);
                   }
                 } catch (error) {
                   console.error(`Error loading video by filename: ${error}`);

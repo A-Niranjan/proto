@@ -270,59 +270,87 @@ def send_message():
     # Generate a unique request ID for this message
     request_id = str(int(time.time() * 1000)) + '-' + str(hash(message) % 10000)
     
-    # Pre-process message to handle special cases like audio merging
+    # Pre-process message to handle special cases like audio merging or format conversion
+    
+    # Process Instagram format conversion requests
+    if 'instagram' in message.lower() and ('format' in message.lower() or 'convert' in message.lower()):
+        print(f"[DEBUG] Pre-processing Instagram format conversion command: {message}")
+        import re
+        
+        # Extract video path
+        video_paths = re.findall(r'[A-Za-z]:\\[^\s]+\.(?:mp4|mov|avi|mkv|webm)', message)
+        if video_paths:
+            video_path = video_paths[0]  # Use the first video path
+            
+            # Determine which Instagram format to use
+            aspect_ratio = "9:16"  # Default to vertical/portrait (stories/reels format)
+            
+            # Check if user specifically requested square format
+            if ('square' in message.lower() or '1:1' in message.lower()):
+                aspect_ratio = "1:1"  # Square format
+            
+            # Get path information
+            dir_name = os.path.dirname(video_path)
+            base_name = os.path.basename(video_path)
+            name, ext = os.path.splitext(base_name)
+            
+            # Generate the output filename with _instagram suffix
+            new_output_filename = f"{name}_instagram{ext}"
+            new_output_path = os.path.join(dir_name, new_output_filename)
+            
+            print(f"[DEBUG] Using aspect ratio {aspect_ratio} for Instagram format conversion")
+            print(f"[DEBUG] Using output path: {new_output_path}")
+            
+            # Rewrite the command to explicitly set the aspect ratio
+            message = f"convert video to {aspect_ratio} aspect ratio {video_path} {new_output_path}"
+            print(f"[DEBUG] Rewritten Instagram format command: {message}")
+    
     # Check if this is a merge_audio_video command that might use the same input and output
-    if 'add audio' in message.lower() or 'merge audio' in message.lower() or 'merge_audio_video' in message.lower():
+    elif 'add audio' in message.lower() or 'merge audio' in message.lower() or 'merge_audio_video' in message.lower():
         print(f"[DEBUG] Pre-processing potential audio merge command: {message}")
         
         # Extract any file paths in the message
         import re
-        file_paths = re.findall(r'[A-Za-z]:\\[^\s]+\.(?:mp4|mov|avi|mkv|webm)', message)
+        # Match video files
+        video_paths = re.findall(r'[A-Za-z]:\\[^\s]+\.(?:mp4|mov|avi|mkv|webm)', message)
+        # Match audio files
+        audio_paths = re.findall(r'[A-Za-z]:\\[^\s]+\.(?:mp3|wav|aac|ogg)', message)
         
-        if len(file_paths) >= 2:
-            # Check if the input and output paths are the same or if output path has _with_audio
-            video_path = None
-            audio_path = None
-            output_path = None
+        # If we have both video and audio paths
+        if video_paths and audio_paths:
+            video_path = video_paths[0]  # Use the first video path
+            audio_path = audio_paths[0]  # Use the first audio path
             
-            for path in file_paths:
-                if path.lower().endswith('.mp3') or path.lower().endswith('.wav') or path.lower().endswith('.aac'):
-                    audio_path = path
-                elif '_with_audio' in path.lower() or 'output_with_audio' in path.lower() or 'output.mp4' in path.lower():
-                    # This is likely both the input video and attempted output path
-                    video_path = path
-                    
-            # If we found a video with _with_audio, it's likely being used as both input and output
-            if video_path and '_with_audio' in video_path.lower():
-                # Generate a new output path with _audio_enhanced suffix
-                dir_name = os.path.dirname(video_path)
-                base_name = os.path.basename(video_path)
-                name, ext = os.path.splitext(base_name)
+            # Always generate a new unique output path for audio merged videos
+            dir_name = os.path.dirname(video_path)
+            base_name = os.path.basename(video_path)
+            name, ext = os.path.splitext(base_name)
+            
+            # Create a clean base name without suffixes or timestamps
+            clean_name = name
+            # Remove any existing suffixes
+            for suffix in ['_with_audio', '-with-audio', '_audio_enhanced', '_processed', '_filtered', '_trimmed', '_batman', '_madmax']:
+                if suffix in clean_name:
+                    clean_name = clean_name.replace(suffix, '')
                 
-                # Create a clean base name without _with_audio or timestamps
-                clean_name = name
-                if '_with_audio' in clean_name:
-                    clean_name = clean_name.replace('_with_audio', '')
-                elif '-with-audio' in clean_name:
-                    clean_name = clean_name.replace('-with-audio', '')
-                    
-                # Remove any timestamp prefix if present
-                if re.match(r'^\d+\-', clean_name):
-                    clean_name = re.sub(r'^\d+\-', '', clean_name)
-                    
-                # Generate new timestamped filename with _audio_enhanced suffix
-                timestamp = int(time.time() * 1000)
-                new_output_filename = f"{timestamp}-{clean_name}_audio_enhanced{ext}"
-                new_output_path = os.path.join(dir_name, new_output_filename)
+            # Remove any timestamp prefix if present
+            if re.match(r'^\d+\-', clean_name):
+                clean_name = re.sub(r'^\d+\-', '', clean_name)
                 
-                print(f"[DEBUG] Preventing in-place editing by using new output path: {new_output_path}")
-                
-                # Replace the output path in the message
-                if audio_path:
-                    # Format: add audio.mp3 to video VIDEO_PATH AUDIO_PATH
-                    # Rewrite to use the new output path
-                    message = f"add audio.mp3 to video {video_path} {audio_path} {new_output_path}"
-                    print(f"[DEBUG] Rewritten message: {message}")
+            # Generate new timestamped filename with _with_audio suffix
+            timestamp = int(time.time() * 1000)
+            new_output_filename = f"{timestamp}-{clean_name}_with_audio{ext}"
+            new_output_path = os.path.join(dir_name, new_output_filename)
+            
+            print(f"[DEBUG] Using new output path for audio merging: {new_output_path}")
+            
+            # Always rewrite the command to use explicit input and output paths
+            message = f"add audio.mp3 to video {video_path} {audio_path} {new_output_path}"
+            print(f"[DEBUG] Rewritten audio merge command: {message}")
+            
+            # We can't use sessions directly, but we can store the path in the message
+            # for later extraction in the response processing
+
     
     # Add user message to chat history with request ID
     user_message = {
@@ -422,6 +450,29 @@ def send_message():
                 # We saw a RESPONSE_START but no content before process ended
                 response = "The operation was performed successfully."
                 print(f"[DEBUG] Got empty response after RESPONSE_START marker, using default success message")
+                
+                # Check if this was an audio merge operation and add file path to response
+                if "add audio" in message.lower():
+                    # Extract output path from message for audio merge operations
+                    output_match = re.search(r'([A-Za-z]:\\[^\s]+_with_audio\.(?:mp4|mov|avi|mkv|webm))', message)
+                    if output_match:
+                        output_path = output_match.group(1)
+                        # Return a modified response that includes the output file path for frontend detection
+                        response = f"The audio file has been successfully merged with the video. The output is in `{output_path}`."
+                        print(f"[DEBUG] Added output path to empty audio merge response: {output_path}")
+                    else:
+                        # If not found in message, try to find the most recent output file
+                        uploads_dir = os.path.join('uploads', 'videos')
+                        if os.path.exists(uploads_dir):
+                            output_files = [f for f in os.listdir(uploads_dir) if f.endswith('.mp4') and ('_with_audio' in f)]
+                            if output_files:
+                                # Sort by creation time, most recent first
+                                output_files.sort(key=lambda x: os.path.getctime(os.path.join(uploads_dir, x)), reverse=True)
+                                output_path = os.path.join(uploads_dir, output_files[0])
+                                response = f"The audio file has been successfully merged with the video. The output is in `{output_path}`."
+                                print(f"[DEBUG] Added most recent output path to empty audio merge response: {output_path}")
+                            else:
+                                print("[DEBUG] Could not find any output files in uploads directory")
             elif all_output:
                 # Fallback: use collected output if no marked response was found
                 filtered_output = [line for line in all_output 
