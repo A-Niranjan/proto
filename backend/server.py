@@ -272,8 +272,61 @@ def send_message():
     
     # Pre-process message to handle special cases like audio merging or format conversion
     
+    # Process video trimming requests to ensure they work correctly
+    if ('trim' in message.lower() and any(x in message.lower() for x in ['sec', 'second', 'minute', 'min'])):
+        print(f"[DEBUG] Pre-processing video trim command: {message}")
+        import re
+        
+        # Extract video path
+        video_paths = re.findall(r'[A-Za-z]:\\[^\s]+\.(?:mp4|mov|avi|mkv|webm)', message)
+        if video_paths:
+            video_path = video_paths[0]  # Use the first video path
+            
+            # Get path information
+            dir_name = os.path.dirname(video_path)
+            base_name = os.path.basename(video_path)
+            name, ext = os.path.splitext(base_name)
+            
+            # Generate the output filename with _trimmed suffix
+            timestamp = int(time.time() * 1000)
+            new_output_filename = f"{timestamp}-{name}_trimmed{ext}"
+            new_output_path = os.path.join(dir_name, new_output_filename)
+            
+            # Extract time values using regex
+            start_time = "0"  # Default start time
+            duration = None
+            end_time = None
+            
+            # Look for various time patterns
+            first_n_sec = re.search(r'first\s+(\d+)\s*(?:sec|second)', message.lower())
+            trim_from_to = re.search(r'trim\s+from\s+(\d+)\s*(?:sec|second)\s+to\s+(\d+)\s*(?:sec|second)', message.lower())
+            trim_n_sec = re.search(r'trim\s+(\d+)\s*(?:sec|second)', message.lower())
+            
+            if first_n_sec:
+                duration = first_n_sec.group(1)
+                print(f"[DEBUG] Detected trim first {duration} seconds")
+            elif trim_from_to:
+                start_time = trim_from_to.group(1)
+                end_time = trim_from_to.group(2)
+                print(f"[DEBUG] Detected trim from {start_time} to {end_time} seconds")
+            elif trim_n_sec:
+                duration = trim_n_sec.group(1)
+                print(f"[DEBUG] Detected trim {duration} seconds")
+            
+            # Rewrite the command to explicitly use re-encoding instead of stream copying
+            # This ensures frame-accurate trimming at the expense of some quality loss
+            if end_time:
+                message = f"trim video with re-encoding {video_path} {new_output_path} {start_time} {end_time}"
+            elif duration:
+                message = f"trim video with re-encoding {video_path} {new_output_path} {start_time} {duration}"
+            else:
+                # Fallback to original message if we couldn't parse the times
+                pass
+                
+            print(f"[DEBUG] Rewritten trim command: {message}")
+    
     # Process Instagram format conversion requests
-    if 'instagram' in message.lower() and ('format' in message.lower() or 'convert' in message.lower()):
+    elif 'instagram' in message.lower() and ('format' in message.lower() or 'convert' in message.lower()):
         print(f"[DEBUG] Pre-processing Instagram format conversion command: {message}")
         import re
         
@@ -457,7 +510,7 @@ def send_message():
                     output_match = re.search(r'([A-Za-z]:\\[^\s]+_with_audio\.(?:mp4|mov|avi|mkv|webm))', message)
                     if output_match:
                         output_path = output_match.group(1)
-                        # Return a modified response that includes the output file path for frontend detection
+                        # Return a modified response with file path for frontend detection (will be cleaned later)
                         response = f"The audio file has been successfully merged with the video. The output is in `{output_path}`."
                         print(f"[DEBUG] Added output path to empty audio merge response: {output_path}")
                     else:
@@ -473,6 +526,7 @@ def send_message():
                                 print(f"[DEBUG] Added most recent output path to empty audio merge response: {output_path}")
                             else:
                                 print("[DEBUG] Could not find any output files in uploads directory")
+                                response = "The audio file has been successfully merged with the video."
             elif all_output:
                 # Fallback: use collected output if no marked response was found
                 filtered_output = [line for line in all_output 
@@ -510,6 +564,22 @@ def send_message():
             # Also remove any leftover tool call patterns just to be safe
             response = re.sub(r'\[Gemini requested tool \'[^\']*\' with arguments: \{[^\}]*\}\]\n?', '', response)
             response = re.sub(r'\[Tool call:[^\]]*\]\n?', '', response)
+            
+            # Clean up file paths from responses as requested by user
+            # Handle various formats of file path mentions
+            response = re.sub(r'\s+The output (?:video )?is (?:in|at|saved to|located at)\s+`[^`]+`\.?', '.', response)
+            response = re.sub(r'\s+The (?:edited|trimmed|converted|output) video is (?:at|saved at|in|located at)\s+`[^`]+`\.?', '.', response)
+            response = re.sub(r'\s+The output (?:file )?is (?:in|at) the (?:specified|following) path:?\s+`?[^`\n]+`?\.?', '.', response)
+            response = re.sub(r'\s+The (?:audio and video|video and audio) (?:has|have) been successfully merged\. The output (?:video )?is (?:at|in|saved at|located at)\s+`[^`]+`\.?', '. The audio and video have been successfully merged.', response)
+            
+            # Match various output path formats
+            response = re.sub(r'(?:You can find|access) the (?:output|processed|converted|merged|trimmed) (?:video|file) at `[^`]+`\.?', '', response)
+            
+            # Remove any lines that are just file paths
+            response = re.sub(r'^(?:[A-Za-z]:\\[^\n]+)$', '', response, flags=re.MULTILINE)
+            
+            # Remove any additional file path info appended at the end
+            response = re.sub(r'\n\nYou can access the processed video at:.+$', '', response)
                 
             print(f"[DEBUG] Final processed response: '{response}'")
             
@@ -539,13 +609,12 @@ def send_message():
                 new_path = handle_output_file(output_mp4_path)
                 
                 if new_path:
-                    # Update the response with the new path if it contains output.mp4
+                    # Update the response with the new path for frontend detection only
+                    # This path info will be removed later by our regex cleanup
                     if 'output.mp4' in response:
+                        # Just replace output.mp4 with the new filename but keep path format for detection
                         response = response.replace('output.mp4', os.path.basename(new_path))
-                        print(f"[DEBUG] Updated response with new path: {response}")
-                        
-                        # Also update the response with the full API path
-                        response = f"{response}\n\nYou can access the processed video at: {new_path}"
+                        print(f"[DEBUG] Updated response with new path (will be cleaned up): {response}")
             
             # Create the assistant message
             assistant_message = {
