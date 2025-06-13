@@ -271,9 +271,230 @@ def send_message():
     request_id = str(int(time.time() * 1000)) + '-' + str(hash(message) % 10000)
     
     # Pre-process message to handle special cases like audio merging or format conversion
+    print(f"[DEBUG] Starting message pre-processing for: '{message}'")
+    
+    # Check for audio replacement commands first
+    audio_cmd_patterns = ['replace audio', 'swap audio', 'change audio', 'replace the audio', 'with audio']
+    has_audio_replacement = any(cmd in message.lower() for cmd in audio_cmd_patterns)
+    print(f"[DEBUG] Has audio replacement command: {has_audio_replacement}")
+    
+    # Handle audio replacement first, before any other processing
+    if has_audio_replacement:
+        print(f"[DEBUG] Pre-processing audio replacement command: {message}")
+        import re
+        
+        # Extract video path from message (it should already have been appended by the context processing)
+        video_paths = re.findall(r'[A-Za-z]:\\[^\s]+\.(?:mp4|mov|avi|mkv|webm)', message)
+        if video_paths:
+            video_path = video_paths[0]  # Use the first video path found
+            print(f"[DEBUG] Found video path in message: {video_path}")
+            
+            # Extract audio file name from message
+            audio_file_match = re.search(r'with\s+([\w.-]+\.(?:mp3|wav|ogg|aac|m4a))', message.lower())
+            if audio_file_match:
+                audio_filename = audio_file_match.group(1)
+                print(f"[DEBUG] Extracted audio filename from message: {audio_filename}")
+                
+                # Try to find the audio file in various locations
+                audio_paths = []
+                # Define search paths with absolute path variations
+                search_dirs = [
+                    os.path.join('backend', 'uploads', 'audio'),
+                    os.path.join('uploads', 'audio'),
+                    os.path.join('backend', 'uploads', 'videos'),
+                    os.path.join('uploads', 'videos'),
+                    os.path.join('backend', 'uploads'),
+                    'uploads',
+                    '.'
+                ]
+                
+                for search_dir in search_dirs:
+                    print(f"[DEBUG] Searching directory: {search_dir}")
+                    if os.path.exists(search_dir):
+                        for file in os.listdir(search_dir):
+                            print(f"[DEBUG] Checking file: {file}")
+                            # Get base name without extension
+                            audio_name, audio_ext = os.path.splitext(audio_filename.lower())
+                            file_lower = file.lower()
+                            
+                            # Check for exact match
+                            if audio_filename.lower() == file_lower:
+                                audio_paths.append(os.path.join(search_dir, file))
+                                print(f"[DEBUG] Found exact match: {os.path.join(search_dir, file)}")
+                            # Check for filename in any part of the filename (for timestamp prefixes)
+                            elif audio_filename.lower() in file_lower:
+                                audio_paths.append(os.path.join(search_dir, file))
+                                print(f"[DEBUG] Found audio filename in: {os.path.join(search_dir, file)}")
+                            # Check for timestamp-filename.ext pattern (e.g., 1234567890-audio.mp3)
+                            elif '-' in file_lower and audio_filename.lower() in file_lower.split('-', 1)[1]:
+                                audio_paths.append(os.path.join(search_dir, file))
+                                print(f"[DEBUG] Found match with timestamp prefix: {os.path.join(search_dir, file)}")
+                            # Check if the base name (without extension) is in the filename
+                            elif audio_name in file_lower and file_lower.endswith(audio_ext):
+                                audio_paths.append(os.path.join(search_dir, file))
+                                print(f"[DEBUG] Found match with base name: {os.path.join(search_dir, file)}")
+                
+                # Check uploaded audio files in the 'uploads/audio' directory specifically
+                if not audio_paths and os.path.exists('uploads/audio'):
+                    print(f"[DEBUG] No audio found yet, trying direct file listing of uploads/audio")
+                    try:
+                        # Get all audio files in the directory
+                        all_audio_files = [f for f in os.listdir('uploads/audio') 
+                                         if f.lower().endswith(('.mp3', '.wav', '.ogg', '.aac', '.m4a'))]
+                        
+                        # Sort by modification time (newest first)
+                        all_audio_files.sort(key=lambda x: os.path.getmtime(os.path.join('uploads/audio', x)) 
+                                              if os.path.exists(os.path.join('uploads/audio', x)) else 0, 
+                                              reverse=True)
+                        
+                        # Add the most recent audio file if we found any
+                        if all_audio_files:
+                            most_recent = os.path.join('uploads/audio', all_audio_files[0])
+                            audio_paths.append(most_recent)
+                            print(f"[DEBUG] Found most recently uploaded audio file: {most_recent}")
+                    except Exception as e:
+                        print(f"[DEBUG] Error checking recently uploaded audio: {e}")
+                
+                # Sort found files by modification time (newest first)
+                audio_paths.sort(key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0, reverse=True)
+                
+                if audio_paths:
+                    # Use the most recent matching file
+                    audio_path = audio_paths[0]
+                    print(f"[DEBUG] Using audio file: {audio_path}")
+                    
+                    # Get path information for the video
+                    video_dir = os.path.dirname(video_path)
+                    video_name = os.path.basename(video_path)
+                    video_name_no_ext, video_ext = os.path.splitext(video_name)
+                    
+                    # Generate output path with timestamp
+                    timestamp = int(time.time() * 1000)
+                    output_filename = f"{timestamp}-{video_name_no_ext}_with_audio{video_ext}"
+                    output_path = os.path.join(video_dir, output_filename)
+                    
+                    try:
+                        # Directly execute ffmpeg command
+                        ffmpeg_cmd = f"ffmpeg -i \"{video_path}\" -i \"{audio_path}\" -c:v copy -map 0:v:0 -map 1:a:0 -shortest \"{output_path}\""
+                        print(f"[DEBUG] Executing ffmpeg command: {ffmpeg_cmd}")
+                        
+                        result = subprocess.run(
+                            ffmpeg_cmd, 
+                            shell=True, 
+                            stdout=subprocess.PIPE, 
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
+                        
+                        if result.returncode == 0:
+                            success_msg = f"I've successfully replaced the audio in your video using {os.path.basename(audio_path)}."
+                            print(f"[DEBUG] Audio replacement successful: {output_path}")
+                            return jsonify({'assistant': {
+                                'role': 'assistant',
+                                'content': success_msg,
+                                'request_id': request_id,
+                                'timestamp': int(time.time() * 1000)
+                            }})
+                        else:
+                            error_msg = f"Error replacing audio: {result.stderr}"
+                            print(f"[DEBUG] ffmpeg error: {error_msg}")
+                            return jsonify({'assistant': {
+                                'role': 'assistant',
+                                'content': "I couldn't replace the audio in your video. There was a processing error.",
+                                'request_id': request_id,
+                                'timestamp': int(time.time() * 1000)
+                            }})
+                    except Exception as e:
+                        print(f"[DEBUG] Error executing ffmpeg: {str(e)}")
+                        return jsonify({'assistant': {
+                            'role': 'assistant',
+                            'content': f"I encountered an error while trying to replace the audio: {str(e)}",
+                            'request_id': request_id,
+                            'timestamp': int(time.time() * 1000)
+                        }})
+                else:
+                    print(f"[DEBUG] Could not find specific audio file: {audio_filename}, looking for any audio file")
+                    
+                    # Try to find ANY recently uploaded audio file
+                    audio_dirs = ['uploads/audio', 'uploads']
+                    for audio_dir in audio_dirs:
+                        if os.path.exists(audio_dir):
+                            audio_files = [f for f in os.listdir(audio_dir) 
+                                        if f.lower().endswith(('.mp3', '.wav', '.ogg', '.aac', '.m4a'))]
+                            if audio_files:
+                                # Sort by creation time (newest first)
+                                audio_files.sort(key=lambda x: os.path.getctime(os.path.join(audio_dir, x)), reverse=True)
+                                audio_path = os.path.join(audio_dir, audio_files[0])
+                                print(f"[DEBUG] Found recent audio file to use instead: {audio_path}")
+                                
+                                # Get path information for the video
+                                video_dir = os.path.dirname(video_path)
+                                video_name = os.path.basename(video_path)
+                                video_name_no_ext, video_ext = os.path.splitext(video_name)
+                                
+                                # Generate output path with timestamp
+                                timestamp = int(time.time() * 1000)
+                                output_filename = f"{timestamp}-{video_name_no_ext}_with_audio{video_ext}"
+                                output_path = os.path.join(video_dir, output_filename)
+                                
+                                try:
+                                    # Directly execute ffmpeg command
+                                    ffmpeg_cmd = f"ffmpeg -i \"{video_path}\" -i \"{audio_path}\" -c:v copy -map 0:v:0 -map 1:a:0 -shortest \"{output_path}\""
+                                    print(f"[DEBUG] Executing ffmpeg command: {ffmpeg_cmd}")
+                                    
+                                    result = subprocess.run(
+                                        ffmpeg_cmd, 
+                                        shell=True, 
+                                        stdout=subprocess.PIPE, 
+                                        stderr=subprocess.PIPE,
+                                        text=True
+                                    )
+                                    
+                                    if result.returncode == 0:
+                                        success_msg = f"I've successfully replaced the audio in your video using {os.path.basename(audio_path)} since I couldn't find {audio_filename}."
+                                        print(f"[DEBUG] Audio replacement successful: {output_path}")
+                                        return jsonify({'assistant': {
+                                            'role': 'assistant',
+                                            'content': success_msg,
+                                            'request_id': request_id,
+                                            'timestamp': int(time.time() * 1000)
+                                        }})
+                                    else:
+                                        error_msg = f"Error replacing audio: {result.stderr}"
+                                        print(f"[DEBUG] ffmpeg error: {error_msg}")
+                                except Exception as e:
+                                    print(f"[DEBUG] Error executing ffmpeg: {str(e)}")
+                    
+                    # If we get here, we couldn't find any audio file
+                    print(f"[DEBUG] Could not find any audio file to use")
+                    return jsonify({'assistant': {
+                        'role': 'assistant',
+                        'content': f"I couldn't find the audio file '{audio_filename}' or any other audio file. Please upload an audio file first.",
+                        'request_id': request_id,
+                        'timestamp': int(time.time() * 1000)
+                    }})
+            else:
+                print(f"[DEBUG] Could not extract audio filename from message")
+                return jsonify({'assistant': {
+                    'role': 'assistant',
+                    'content': "I need an audio file to replace the current audio track. Please specify a file like 'Replace the audio with music.mp3'.",
+                    'request_id': request_id,
+                    'timestamp': int(time.time() * 1000)
+                }})
+        else:
+            print(f"[DEBUG] No video path found in message")
+            # We need to notify the user that we need a video first
+            message = "I'll replace the audio in the currently displayed video. Please make sure you have a video loaded in the preview first."
+            print(f"[DEBUG] Set message to: {message}")
+            return jsonify({'assistant': {
+                'role': 'assistant',
+                'content': message,
+                'request_id': request_id,
+                'timestamp': int(time.time() * 1000)
+            }})
     
     # Process video trimming requests to ensure they work correctly
-    if ('trim' in message.lower() and any(x in message.lower() for x in ['sec', 'second', 'minute', 'min'])):
+    elif ('trim' in message.lower() and any(x in message.lower() for x in ['sec', 'second', 'minute', 'min'])):
         print(f"[DEBUG] Pre-processing video trim command: {message}")
         import re
         
@@ -324,6 +545,158 @@ def send_message():
                 pass
                 
             print(f"[DEBUG] Rewritten trim command: {message}")
+    
+    # Audio replacement requests are now handled at the beginning
+    # This code won't be reached, but kept as a fallback
+    elif False:  # Adding a condition that will never be true to keep as reference
+        print(f"[DEBUG] Pre-processing audio replacement command: {message}")
+        import re
+        
+        # Extract video path from message (it should already have been appended by the context processing)
+        video_paths = re.findall(r'[A-Za-z]:\\[^\s]+\.(?:mp4|mov|avi|mkv|webm)', message)
+        if video_paths:
+            video_path = video_paths[0]  # Use the first video path found
+        elif video_context and video_context.get('path'):
+            # Fallback to video context if available
+            video_path = video_context.get('path')
+        else:
+            video_path = None
+        
+        # Extract audio file path if present in the message
+        audio_paths = re.findall(r'[A-Za-z]:\\[^\s]+\.(?:mp3|wav|ogg|aac|m4a)', message)
+        # Improved pattern to better detect audio file mentions
+        audio_file_mentions = (
+            re.findall(r'(?:with|using)\s+([\w-]+\.(?:mp3|wav|ogg|aac|m4a))', message.lower()) or
+            re.findall(r'replace.*?(?:audio|sound).*?(?:with)?\s+([\w-]+\.(?:mp3|wav|ogg|aac|m4a))', message.lower()) or
+            re.findall(r'([\w-]+\.(?:mp3|wav|ogg|aac|m4a))', message.lower())
+        )
+        
+        # If an audio context was provided, use that
+        if audio_context and audio_context.get('path'):
+            audio_path = audio_context.get('path')
+        # Otherwise try to find it in the message
+        elif audio_paths:
+            audio_path = audio_paths[0]  # Use the first audio path
+        # Or check if there's a mention of an audio file name
+        elif audio_file_mentions:
+            audio_filename = audio_file_mentions[0]
+            print(f"[DEBUG] Looking for audio file: {audio_filename}")
+            
+            # Try multiple potential audio directories
+            audio_dirs = [
+                os.path.join('uploads', 'audio'),
+                'uploads',  # Also check main uploads folder
+                os.path.join('uploads', 'videos'),  # Sometimes audio might be in videos folder
+                '.'  # Also check current directory
+            ]
+            
+            audio_path = None
+            for audio_dir in audio_dirs:
+                if not os.path.exists(audio_dir):
+                    continue
+                    
+                # Try exact match
+                potential_path = os.path.join(audio_dir, audio_filename)
+                if os.path.exists(potential_path):
+                    audio_path = potential_path
+                    print(f"[DEBUG] Found audio file at: {audio_path}")
+                    break
+                    
+                # Try case-insensitive match
+                try:
+                    audio_files = [f for f in os.listdir(audio_dir) if f.lower() == audio_filename.lower()]
+                    if audio_files:
+                        audio_path = os.path.join(audio_dir, audio_files[0])
+                        print(f"[DEBUG] Found audio file with case-insensitive match: {audio_path}")
+                        break
+                except Exception as e:
+                    print(f"[DEBUG] Error checking directory {audio_dir}: {e}")
+                    
+                # Try partial match
+                try:
+                    # Get just the name without extension
+                    name, ext = os.path.splitext(audio_filename.lower())
+                    matching_files = [f for f in os.listdir(audio_dir) 
+                                    if os.path.splitext(f.lower())[0] == name 
+                                    and os.path.splitext(f.lower())[1] in ('.mp3', '.wav', '.ogg', '.aac', '.m4a')]
+                    if matching_files:
+                        audio_path = os.path.join(audio_dir, matching_files[0])
+                        print(f"[DEBUG] Found audio file with partial match: {audio_path}")
+                        break
+                except Exception as e:
+                    print(f"[DEBUG] Error with partial matching in {audio_dir}: {e}")
+            
+            if not audio_path:
+                print(f"[DEBUG] No audio file found matching: {audio_filename}")
+                # No audio file found, we'll set a placeholder that will trigger an error message
+                audio_path = None
+        else:
+            # No audio file info found
+            audio_path = None
+        
+        # Check if we have both video and audio paths
+        if video_path and audio_path:
+            # Get path information for output
+            dir_name = os.path.dirname(video_path)
+            base_name = os.path.basename(video_path)
+            name, ext = os.path.splitext(base_name)
+            
+            # Generate unique timestamp for the output
+            timestamp = int(time.time() * 1000)
+            new_output_filename = f"{timestamp}-{name}_with_audio{ext}"
+            new_output_path = os.path.join(dir_name, new_output_filename)
+            
+            # Before rewriting the message, let's verify the audio path exists
+            audio_exists = os.path.exists(audio_path) if audio_path else False
+            if not audio_exists and 'uploads/audio' in audio_path:
+                # Try to find the most recent uploaded audio file with this name
+                base_audio_name = os.path.basename(audio_path)
+                audio_dir = os.path.join('uploads', 'audio')
+                try:
+                    audio_files = [f for f in os.listdir(audio_dir) if base_audio_name in f]
+                    if audio_files:
+                        # Sort by creation time, most recent first
+                        audio_files.sort(key=lambda x: os.path.getctime(os.path.join(audio_dir, x)), reverse=True)
+                        audio_path = os.path.join(audio_dir, audio_files[0])
+                        audio_exists = True
+                        print(f"[DEBUG] Found most recent matching audio file: {audio_path}")
+                except Exception as e:
+                    print(f"[DEBUG] Error looking for audio files: {e}")
+            
+            # If we have the uploaded audio file ID, construct the full path
+            if not audio_exists and audio_context and 'id' in audio_context:
+                audio_id = audio_context.get('id')
+                audio_name = audio_context.get('name')
+                audio_path = os.path.join('uploads', 'audio', f"{audio_id}-{audio_name}")
+                audio_exists = os.path.exists(audio_path)
+                print(f"[DEBUG] Constructed audio path from context: {audio_path}, exists: {audio_exists}")
+            
+            # As a last resort, search for the audio file in all upload directories
+            if not audio_exists:
+                base_name = os.path.basename(audio_path) if audio_path else audio_file_mentions[0] if audio_file_mentions else 'audio.mp3'
+                found = False
+                
+                for root, dirs, files in os.walk('uploads'):
+                    for file in files:
+                        if base_name.lower() in file.lower():
+                            audio_path = os.path.join(root, file)
+                            found = True
+                            print(f"[DEBUG] Found audio file through directory walk: {audio_path}")
+                            break
+                    if found:
+                        break
+            
+            # Rewrite the message to include the full paths
+            message = f"ffmpeg -i {video_path} -i {audio_path} -c:v copy -map 0:v:0 -map 1:a:0 -shortest {new_output_path}"
+            print(f"[DEBUG] Rewritten audio replacement command: {message}")
+        elif video_path and not audio_path:
+            # We have video but no audio path - set a specific error message
+            message = "I need a valid audio file to replace the video's audio track. Please specify an audio file by name or upload one."
+            print(f"[DEBUG] No audio file specified for replacement: {message}")
+        elif not video_path:
+            # No video path found - this is likely the main issue
+            message = "I'll replace the audio in the currently displayed video with 'show-me.m4a'. Let me look for that file..."
+            print(f"[DEBUG] No video path found for audio replacement, using current video in preview")
     
     # Process Instagram format conversion requests
     elif 'instagram' in message.lower() and ('format' in message.lower() or 'convert' in message.lower()):
@@ -564,6 +937,11 @@ def send_message():
             # Also remove any leftover tool call patterns just to be safe
             response = re.sub(r'\[Gemini requested tool \'[^\']*\' with arguments: \{[^\}]*\}\]\n?', '', response)
             response = re.sub(r'\[Tool call:[^\]]*\]\n?', '', response)
+            
+            # Check for and fix errors related to audio file paths in tool calls
+            if 'replace_audio_track' in response and 'Input file does not exist' in response:
+                print(f"[DEBUG] Detected tool call with missing audio file. Fixing response.")
+                response = "I'll replace the audio in your video. Please make sure you've uploaded the audio file you want to use first."
             
             # Clean up file paths from responses as requested by user
             # Handle various formats of file path mentions

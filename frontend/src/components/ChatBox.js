@@ -354,53 +354,70 @@ const ChatBox = ({ messages, onSendMessage, isWaiting, onNewChat }) => {
         padding: isSmallMobile ? '12px' : '16px',
         borderTop: '1px solid rgba(255,255,255,0.08)',
         display: 'flex',
-        alignItems: 'center',
+        flexDirection: 'column',
         gap: '12px'
       }}>
-        <input 
-          ref={inputRef}
-          type="text" 
-          className="message-input" 
-          placeholder="Message AI assistant..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyPress={handleKeyPress}
-          disabled={isWaiting}
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            border: 'none',
-            borderRadius: '20px',
-            padding: isSmallMobile ? '10px 16px' : '12px 18px',
-            color: 'rgba(255,255,255,0.9)',
-            fontSize: '0.95rem',
-            fontFamily: 'inherit',
-            outline: 'none',
-            transition: 'all 0.2s ease',
-            boxShadow: input ? '0 0 0 2px rgba(156, 39, 176, 0.3)' : 'none'
-          }}
-        />
-        
-        <IconButton
-          onClick={handleSend}
-          disabled={!input.trim() || isWaiting}
-          sx={{
-            backgroundColor: input.trim() ? '#9c27b0' : 'rgba(255,255,255,0.1)',
-            width: isSmallMobile ? '38px' : '42px',
-            height: isSmallMobile ? '38px' : '42px',
-            color: '#fff',
-            '&:hover': {
-              backgroundColor: input.trim() ? '#b52cc7' : 'rgba(255,255,255,0.15)'
-            },
-            '&.Mui-disabled': {
-              backgroundColor: 'rgba(255,255,255,0.1)',
-              color: 'rgba(255,255,255,0.3)'
-            },
-            transition: 'all 0.2s ease'
-          }}
-        >
+        <div style={{ 
+          position: 'relative',
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column'
+        }}>
+          <textarea 
+            ref={inputRef}
+            className="message-input" 
+            placeholder="Message AI assistant..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={handleKeyPress}
+            disabled={isWaiting}
+            rows={3}
+            style={{
+              flex: 1,
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              border: 'none',
+              borderRadius: '12px',
+              padding: isSmallMobile ? '12px 16px' : '14px 18px',
+              paddingRight: '50px', // Make room for the send button
+              color: 'rgba(255,255,255,0.9)',
+              fontSize: '0.95rem',
+              fontFamily: 'inherit',
+              outline: 'none',
+              transition: 'all 0.2s ease',
+              boxShadow: input ? '0 0 0 2px rgba(156, 39, 176, 0.3)' : 'none',
+              resize: 'none',
+              lineHeight: '1.5',
+              width: '100%',
+              minHeight: '80px',
+              maxHeight: '150px',
+              overflowY: 'auto'
+            }}
+          />
+          
+          <IconButton
+            onClick={handleSend}
+            disabled={!input.trim() || isWaiting}
+            sx={{
+              position: 'absolute',
+              right: '8px',
+              bottom: '8px',
+              backgroundColor: input.trim() ? '#9c27b0' : 'rgba(255,255,255,0.1)',
+              width: isSmallMobile ? '38px' : '42px',
+              height: isSmallMobile ? '38px' : '42px',
+              color: '#fff',
+              '&:hover': {
+                backgroundColor: input.trim() ? '#b52cc7' : 'rgba(255,255,255,0.15)'
+              },
+              '&.Mui-disabled': {
+                backgroundColor: 'rgba(255,255,255,0.1)',
+                color: 'rgba(255,255,255,0.3)'
+              },
+              transition: 'all 0.2s ease'
+            }}
+          >
           <SendIcon fontSize="small" />
         </IconButton>
+        </div>
       </div>
     </div>
   );

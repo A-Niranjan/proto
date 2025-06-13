@@ -808,7 +808,8 @@ function App() {
       'clip', 'part', 'portion', 'scene', 'include only', 'exclude', 'include', 'cut out',
       'madmax', 'mad max',
       'add audio', 'add music', 'add sound', 'merge audio', 'add soundtrack', 'overlay audio',
-      'combine audio', 'combine with audio', 'attach audio', 'include audio'
+      'combine audio', 'combine with audio', 'attach audio', 'include audio', 'replace audio',
+      'swap audio', 'change audio', 'use audio', 'set audio'
     ]; 
   
     // Exclusion list - commands that should NOT get a video path even if they match video commands
@@ -828,19 +829,41 @@ function App() {
     
     // Check if the message mentions an audio file
     const lowerMessage = message.toLowerCase();
-    const audioCommands = ['add audio', 'add music', 'add sound', 'merge audio', 'add soundtrack', 'overlay audio'];
+    const audioCommands = [
+      'add audio', 'add music', 'add sound', 'merge audio', 'add soundtrack', 'overlay audio',
+      'replace audio', 'swap audio', 'change audio', 'use audio', 'set audio'
+    ];
+    
+    // Special direct handling for replace audio commands
+    const isReplaceAudioCommand = lowerMessage.includes('replace') && 
+                                lowerMessage.includes('audio') && 
+                                !hasFilePath;
+    
+    // If this is a replace audio command and we have a video loaded, add special handling
+    if (isReplaceAudioCommand && selectedVideo) {
+      console.log('Direct handling for replace audio command');
+      includesVideoPath = true;
+    }
+    
     const isAudioCommand = audioCommands.some(cmd => lowerMessage.includes(cmd));
     
     // If this is an audio-related command, look for audio file references
     if (isAudioCommand) {
       // Extract potential audio file names using regex
-      // Look for patterns like "add music.mp3 to the video" or "add the file sound.mp3"
-      const audioFileMatches = lowerMessage.match(/add\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) || 
-                             lowerMessage.match(/music\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
-                             lowerMessage.match(/audio\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
-                             lowerMessage.match(/sound\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
-                             // Also look for just the file name with extension
-                             lowerMessage.match(/([\w-]+\.(mp3|wav|ogg|aac|m4a))/); 
+      // Look for various patterns for audio file references
+      const audioFileMatches = 
+        // Add/replace commands followed by filename
+        lowerMessage.match(/add\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) || 
+        lowerMessage.match(/replace\s+(?:with\s+)?([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
+        lowerMessage.match(/with\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
+        // Audio-related terms followed by filename
+        lowerMessage.match(/music\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
+        lowerMessage.match(/audio\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
+        lowerMessage.match(/sound\s+([\w-]+\.(mp3|wav|ogg|aac|m4a))/) ||
+        // Filename followed by audio-related terms
+        lowerMessage.match(/([\w-]+\.(mp3|wav|ogg|aac|m4a))\s+(?:audio|sound|track|music)/) ||
+        // Just look for the file name with extension (as a fallback)
+        lowerMessage.match(/([\w-]+\.(mp3|wav|ogg|aac|m4a))/); 
       
       if (audioFileMatches && audioFileMatches[1]) {
         const audioFileName = audioFileMatches[1];
